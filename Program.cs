@@ -23,7 +23,7 @@ using WwanProbe.Infrastructure.Gnss;
 using WwanProbe.Infrastructure.Modem;
 using WwanProbe.Presentation;
 
-if (args.Length > 0 && args[0] == NmeaReceiver.HelperArgument) return NmeaHelper.Run(args.Skip(1).ToList());
+if (args.Length > 0 && args[0] == NmeaReceiver.HelperArgument) return NmeaHelper.Run([.. args.Skip(1)]);
 
 CommandLine? options = CommandLine.Parse(args, out string? error);
 if (options is null)
@@ -47,7 +47,7 @@ try
         return 1;
     }
 
-    MonitorConfig config = new MonitorConfig { Interval = options.Interval, Count = options.Count, CsvPath = options.CsvPath, AtPort = options.AtPort };
+    MonitorConfig config = new() { Interval = options.Interval, Count = options.Count, CsvPath = options.CsvPath, AtPort = options.AtPort };
     MonitorSession session = MonitorSession.Initialize(modem, new PdhTrafficCounter(), config);
     try
     {
@@ -58,12 +58,12 @@ try
         {
             // Ctrl+C ends the loop after the current sample so the receivers below are stopped;
             // a second Ctrl+C terminates at once.
-            using CancellationTokenSource cancel = new CancellationTokenSource();
-            ConsoleCancelEventHandler onCancel = (_, e) =>
+            using CancellationTokenSource cancel = new();
+            void onCancel(object? _, ConsoleCancelEventArgs e)
             {
                 e.Cancel = !cancel.IsCancellationRequested;
                 cancel.Cancel();
-            };
+            }
             Console.CancelKeyPress += onCancel;
             try { PlainMonitor.Run(session, cancel.Token); }
             finally { Console.CancelKeyPress -= onCancel; }
@@ -77,7 +77,7 @@ try
     finally
     {
         try { session.NmeaReceiver?.Stop(); }
-        finally { session.GpsReceiver?.Stop(); }
+        finally { session.GpsReceiver?.Dispose(); }
     }
     return 0;
 }

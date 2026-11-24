@@ -4,7 +4,7 @@ namespace WwanProbe.Infrastructure.Gnss
 {
     // Normalized GPS state for one sample. Status: Fix | NoFix | Stale | Disabled | Unavailable.
     // Position values are set only for a fresh local satellite fix; missing values stay null.
-    public sealed record GpsObservation
+    internal sealed record GpsObservation
     {
         public string Status { get; init; } = "NoFix";
         public string Source { get; init; } = "";
@@ -26,7 +26,7 @@ namespace WwanProbe.Infrastructure.Gnss
         public static GpsObservation FromReading(GpsReading reading, DateTimeOffset? now = null)
         {
             DateTimeOffset at = now ?? DateTimeOffset.UtcNow;
-            GpsObservation gps = new GpsObservation();
+            GpsObservation gps = new();
             if (!string.IsNullOrEmpty(reading.Error)) return gps with { Status = "Unavailable", Error = reading.Error };
             switch (reading.Status?.ToUpperInvariant())
             {
@@ -36,6 +36,9 @@ namespace WwanProbe.Infrastructure.Gnss
                 case "INITIALIZING":
                 case "NOTINITIALIZED":
                     return gps;
+                default:
+                    // READY (and any newer status) goes on to the coordinate.
+                    break;
             }
             GpsCoordinate? c = reading.Coordinate;
             if (c is null) return gps;
@@ -45,7 +48,7 @@ namespace WwanProbe.Infrastructure.Gnss
             DateTimeOffset? timestamp = c.PositionSourceTimestamp ?? c.Timestamp;
             if (timestamp is not DateTimeOffset ts) return gps;
             double age = (at - ts).TotalSeconds;
-            if (age > 15 || age < -5) return gps with { Status = "Stale" };
+            if (age is > 15 or < -5) return gps with { Status = "Stale" };
             double? latitude = Number(c.Latitude, -90, 90);
             double? longitude = Number(c.Longitude, -180, 180);
             if (latitude is null || longitude is null) return gps;
@@ -70,24 +73,16 @@ namespace WwanProbe.Infrastructure.Gnss
         }
 
         private static double? Number(double? value, double min = double.NegativeInfinity, double max = double.PositiveInfinity)
-        {
-            if (value is not double v || !double.IsFinite(v) || v < min || v > max) return null;
-            return v;
-        }
+            => value is not double v || !double.IsFinite(v) || v < min || v > max ? null : v;
     }
 
     // Windows GNSS reports (-Gps). Geolocator cannot select a particular modem or identify the
     // physical GPS receiver. A startup failure is kept in Error and reported by every sample.
-    public sealed class GpsSource
+    // Owns Client: Dispose stops it.
+    internal sealed class GpsSource(GpsReceiver? client, string? error) : IDisposable
     {
-        public GpsSource(GpsReceiver? client, string? error)
-        {
-            Client = client;
-            Error = error;
-        }
-
-        public GpsReceiver? Client { get; }
-        public string? Error { get; }
+        public GpsReceiver? Client { get; } = client;
+        public string? Error { get; } = error;
 
         public static GpsSource Start()
         {
@@ -95,7 +90,7 @@ namespace WwanProbe.Infrastructure.Gnss
             catch (Exception ex) { return new GpsSource(null, ex.Message); }
         }
 
-        public void Stop() => Client?.Dispose();
+        public void Dispose() => Client?.Dispose();
 
         public GpsObservation Observe()
         {

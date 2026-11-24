@@ -6,9 +6,9 @@ namespace WwanProbe.Infrastructure.Modem
     // Normalized observations from WinRT and AT for one sample.
     // AT values are null when unavailable (AtError holds the reason when the session failed);
     // Neighbors fall back to WinRT when the AT channel has no neighbor list (empty = none reported).
-    public sealed class ModemObservation
+    internal sealed class ModemObservation
     {
-        private static readonly Dictionary<string, string> DataClassRats = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        private static readonly Dictionary<string, string> DataClassRats = new(StringComparer.OrdinalIgnoreCase)
         {
             ["Gprs"] = Rat.Gsm,
             ["Edge"] = Rat.Gsm,
@@ -31,13 +31,13 @@ namespace WwanProbe.Infrastructure.Modem
         public string ProviderName { get; set; } = "";
         public string ProviderId { get; set; } = "";
         public string DataClass { get; set; } = "";
-        public IReadOnlyList<string> RegisteredRats { get; set; } = Array.Empty<string>();
+        public IReadOnlyList<string> RegisteredRats { get; set; } = [];
         public string Apn { get; set; } = "";
         public double? BwMbps { get; set; }
         public double? RxKB { get; set; }
         public double? TxKB { get; set; }
-        public IReadOnlyList<ServingCell> Serving { get; set; } = Array.Empty<ServingCell>();
-        public IReadOnlyList<UmtsCell> Umts { get; set; } = Array.Empty<UmtsCell>();
+        public IReadOnlyList<ServingCell> Serving { get; set; } = [];
+        public IReadOnlyList<UmtsCell> Umts { get; set; } = [];
         public IReadOnlyList<LteNeighbor>? Neighbors { get; set; }
         public double? TempC { get; set; }
         public double? Rssnr { get; set; }  // dB, assuming 0.5 dB steps on Intel (unit undocumented)
@@ -50,18 +50,20 @@ namespace WwanProbe.Infrastructure.Modem
         public string? Error { get; set; }
 
         // Normalize WinRT DataClasses flags ("Lte, NewRadioNonStandalone") into RAT identities.
-        public static IReadOnlyList<string> RatsFromDataClass(string? dataClass) =>
-            (dataClass ?? "").Split(',')
+        public static IReadOnlyList<string> RatsFromDataClass(string? dataClass)
+        {
+            return [.. (dataClass ?? "").Split(',')
                 .Select(n => DataClassRats.TryGetValue(n.Trim(), out string? rat) ? rat : null)
-                .Where(r => r is not null).Select(r => r!).Distinct().ToList();
+                .Where(r => r is not null).Select(r => r!).Distinct()];
+        }
 
         // LTE neighbor cells reported by WinRT (MBIM_CID_BASE_STATIONS_INFO), or null when there are none.
         // Returning none is allowed by the spec (the L860-GL never reports any), so an empty list is
         // treated as "unavailable" and does not hide the AT error.
         public static List<LteNeighbor>? WinRtLteNeighbors(IEnumerable<LteCellInfo>? cells)
         {
-            List<LteNeighbor> neighbors = new List<LteNeighbor>();
-            foreach (LteCellInfo cell in cells ?? Array.Empty<LteCellInfo>())
+            List<LteNeighbor> neighbors = [];
+            foreach (LteCellInfo cell in cells ?? [])
             {
                 if (cell is null) continue;
                 int? rsrp = SignalConversion.FromWinRtRsrp(cell.Rsrp);
@@ -74,7 +76,7 @@ namespace WwanProbe.Infrastructure.Modem
         // at: the startup AT detection; null skips the AT values.
         public static ModemObservation Observe(IModemDevice modem, ModemAt? at, ITrafficCounter traffic)
         {
-            ModemObservation o = new ModemObservation
+            ModemObservation o = new()
             {
                 Timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
                 AtSource = at?.Profile?.Source,
@@ -96,7 +98,7 @@ namespace WwanProbe.Infrastructure.Modem
                 o.TxKB = t.TxKB;
                 o.TrafficError = t.Error;
 
-                o.Serving = cells.ServingLte.Select(c => new ServingCell
+                o.Serving = [.. cells.ServingLte.Select(c => new ServingCell
                 {
                     RsrpDbm = SignalConversion.FromWinRtRsrp(c.Rsrp),
                     RsrpRaw = c.Rsrp,
@@ -109,7 +111,7 @@ namespace WwanProbe.Infrastructure.Modem
                     Tac = c.Tac,
                     Ta = c.Ta,
                     Provider = string.IsNullOrEmpty(c.ProviderId) ? o.ProviderId : c.ProviderId,
-                }).ToList();
+                })];
 
                 // WinRT lacks temperature, SINR and CA info (and neighbors on the L860-GL).
                 try

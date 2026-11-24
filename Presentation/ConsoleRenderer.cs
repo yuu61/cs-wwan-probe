@@ -1,13 +1,14 @@
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 using WwanProbe.Application;
 
 namespace WwanProbe.Presentation
 {
-    public readonly record struct ConsoleSize(int Width, int Height);
+    internal readonly record struct ConsoleSize(int Width, int Height);
 
     // The console operations the TUI needs (SystemConsole on a real console, fakes in tests).
-    public interface IConsoleSurface
+    internal interface IConsoleSurface
     {
         ConsoleSize Size { get; }
         void SetCursorRow(int row);
@@ -16,7 +17,7 @@ namespace WwanProbe.Presentation
     }
 
     // One frame line as console text: clipped / padded to width, colored with VT (SGR) sequences.
-    public static class ConsoleLine
+    internal static class ConsoleLine
     {
         // ConsoleColor -> SGR foreground code (background = +10).
         public static int Sgr(ConsoleColor color)
@@ -30,9 +31,9 @@ namespace WwanProbe.Presentation
 
         public static string Render(FrameLine line, int width, ConsoleColor? background = null)
         {
-            StringBuilder sb = new StringBuilder();
-            sb.Append(Fg(line.Color));
-            if (background is ConsoleColor bg) sb.Append($"\e[{Sgr(bg) + 10}m");
+            StringBuilder sb = new();
+            _ = sb.Append(Fg(line.Color));
+            if (background is ConsoleColor bg) _ = sb.Append(CultureInfo.InvariantCulture, $"\e[{Sgr(bg) + 10}m");
             if (line.Segments.Count > 0)
             {
                 int remaining = Math.Max(0, width);
@@ -40,31 +41,31 @@ namespace WwanProbe.Presentation
                 {
                     if (remaining <= 0) break;
                     int length = Math.Min(segment.Text.Length, remaining);
-                    sb.Append(Fg(segment.Color));
-                    if (segment.GrayLevel is byte level) sb.Append($"\e[38;2;{level};{level};{level}m");
-                    sb.Append(segment.Text, 0, length);
+                    _ = sb.Append(Fg(segment.Color));
+                    if (segment.GrayLevel is byte level) _ = sb.Append(CultureInfo.InvariantCulture, $"\e[38;2;{level};{level};{level}m");
+                    _ = sb.Append(segment.Text, 0, length);
                     // End the RGB override before spaces, the NR suffix or the next line.
-                    if (segment.GrayLevel is not null) sb.Append("\e[39m");
+                    if (segment.GrayLevel is not null) _ = sb.Append("\e[39m");
                     remaining -= length;
                 }
-                sb.Append(Fg(line.Color));
-                sb.Append(' ', remaining);
+                _ = sb.Append(Fg(line.Color));
+                _ = sb.Append(' ', remaining);
             }
             else
             {
-                string text = line.Text.Length > width ? line.Text.Substring(0, Math.Max(0, width)) : line.Text;
-                sb.Append(text.PadRight(Math.Max(0, width)));
+                string text = line.Text.Length > width ? line.Text[..Math.Max(0, width)] : line.Text;
+                _ = sb.Append(text.PadRight(Math.Max(0, width)));
             }
-            sb.Append("\e[0m");
+            _ = sb.Append("\e[0m");
             return sb.ToString();
         }
     }
 
     // The real console. Keep drawing within both the visible window and the current buffer, leaving
     // the rightmost column unused so writing the footer cannot scroll the screen.
-    public sealed class SystemConsole : IConsoleSurface
+    internal sealed class SystemConsole : IConsoleSurface
     {
-        public ConsoleSize Size => new ConsoleSize(
+        public ConsoleSize Size => new(
             Math.Max(0, Math.Min(Console.WindowWidth, Console.BufferWidth) - 1),
             Math.Max(0, Math.Min(Console.WindowHeight, Console.BufferHeight)));
 
@@ -75,11 +76,9 @@ namespace WwanProbe.Presentation
         public void Clear() => Console.Clear();
     }
 
-    public sealed class ConsoleRenderer
+    internal sealed class ConsoleRenderer(IConsoleSurface console)
     {
-        private readonly IConsoleSurface console;
-
-        public ConsoleRenderer(IConsoleSurface console) => this.console = console;
+        private readonly IConsoleSurface console = console;
 
         // Redraws the whole screen in place (no clear per frame to avoid flicker).
         // Returns false if a resize interrupts this frame; the UI retries on its next tick.
@@ -134,30 +133,32 @@ namespace WwanProbe.Presentation
     }
 
     // Console modes for the TUI: VT processing (alternate screen, colors) on the output handle.
-    internal static class ConsoleMode
+    internal static partial class ConsoleMode
     {
         private const int StdOutputHandle = -11;
         private const uint EnableVirtualTerminalProcessing = 0x0004;
 
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern IntPtr GetStdHandle(int handle);
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool GetConsoleMode(IntPtr handle, out uint mode);
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool SetConsoleMode(IntPtr handle, uint mode);
+        [LibraryImport("kernel32.dll", SetLastError = true)]
+        private static partial IntPtr GetStdHandle(int handle);
+        [LibraryImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static partial bool GetConsoleMode(IntPtr handle, out uint mode);
+        [LibraryImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static partial bool SetConsoleMode(IntPtr handle, uint mode);
 
         // Returns the previous mode to restore, or null when the output is not a console.
         public static uint? EnableVirtualTerminal()
         {
             IntPtr handle = GetStdHandle(StdOutputHandle);
             if (!GetConsoleMode(handle, out uint mode)) return null;
-            if ((mode & EnableVirtualTerminalProcessing) == 0) SetConsoleMode(handle, mode | EnableVirtualTerminalProcessing);
+            if ((mode & EnableVirtualTerminalProcessing) == 0) _ = SetConsoleMode(handle, mode | EnableVirtualTerminalProcessing);
             return mode;
         }
 
         public static void Restore(uint? mode)
         {
-            if (mode is uint m) SetConsoleMode(GetStdHandle(StdOutputHandle), m);
+            if (mode is uint m) _ = SetConsoleMode(GetStdHandle(StdOutputHandle), m);
         }
     }
 }

@@ -7,22 +7,19 @@ namespace WwanProbe.Infrastructure.Modem
     // AT status response parsing for Intel XMM modems (Fibocom L860-GL etc.) (pure, no I/O).
     // Reference: FIBOCOM L860 AT Commands User Manual V3.2.3 (see docs/neighbor-cells.md).
     // Every parser returns null when the response is missing, "ERROR", or the value is invalid.
-    public static class IntelStatus
+    internal static partial class IntelStatus
     {
         private const uint XmciInvalid = uint.MaxValue;
-        private static readonly Regex XmciLine = new Regex(@"^\+XMCI:\s*(.+)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-        private static readonly Regex XmciHexText = new Regex("^0x([0-9A-Fa-f]+)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        [GeneratedRegex("^0x([0-9A-Fa-f]+)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+        private static partial Regex XmciHexText();
 
-        private static bool TryInt(string? text, out int value) =>
-            int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
+        private static bool TryInt(string? text, out int value) => int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
 
         // AT+MTSM=1 -> "+MTSM: <Temp>" (Celsius, -40..125)
         public static int? ParseMtsm(string? response)
         {
             string[]? f = AtResponse.GetField(response, "MTSM");
-            if (f is null) return null;
-            if (!TryInt(f[0], out int temp) || temp < -40 || temp > 125) return null;
-            return temp;
+            return f is not null && TryInt(f[0], out int temp) && temp is >= -40 and <= 125 ? temp : null;
         }
 
         // AT+XCESQ? -> "+XCESQ: <n>,<rxlev>,<ber>,<rscp>,<ecno>,<rsrq>,<rsrp>,<rssnr>,..."
@@ -31,9 +28,7 @@ namespace WwanProbe.Infrastructure.Modem
         public static double? ParseXcesq(string? response)
         {
             string[]? f = AtResponse.GetField(response, "XCESQ");
-            if (f is null || f.Length < 8) return null;
-            if (!TryInt(f[7], out int rssnr) || rssnr < -100 || rssnr > 100) return null;
-            return rssnr / 2.0;
+            return f is { Length: >= 8 } && TryInt(f[7], out int rssnr) && rssnr is >= -100 and <= 100 ? rssnr / 2.0 : null;
         }
 
         // AT+XLEC? -> "+XLEC: <n>,<no_of_cells>,<bandwidth>[,<bandwidth>...][,<undocumented>...]"
@@ -44,7 +39,7 @@ namespace WwanProbe.Infrastructure.Modem
             string[]? f = AtResponse.GetField(response, "XLEC");
             if (f is null || f.Length < 2) return null;
             if (!TryInt(f[1], out int cells) || cells < 0 || cells > 5) return null;
-            List<double?> bandwidths = new List<double?>();
+            List<double?> bandwidths = [];
             for (int i = 0; i < cells && 2 + i < f.Length; i++)
             {
                 bool valid = TryInt(f[2 + i], out int bw) && bw >= 0 && bw < AtResponse.LteIndexBandwidthMHz.Count;
@@ -61,15 +56,15 @@ namespace WwanProbe.Infrastructure.Modem
         {
             string[]? f = AtResponse.GetField(response, "XACT");
             if (f is null || f.Length < 4) return null;
-            string[] modes = { "2G", "3G", "4G", "2G+3G", "3G+4G", "2G+4G", "2G+3G+4G" };
+            string[] modes = ["2G", "3G", "4G", "2G+3G", "3G+4G", "2G+4G", "2G+3G+4G"];
             string[][] modeRats =
-            {
-                new[] { Rat.Gsm }, new[] { Rat.Umts }, new[] { Rat.Lte }, new[] { Rat.Gsm, Rat.Umts },
-                new[] { Rat.Umts, Rat.Lte }, new[] { Rat.Gsm, Rat.Lte }, new[] { Rat.Gsm, Rat.Umts, Rat.Lte },
-            };
+            [
+                [Rat.Gsm], [Rat.Umts], [Rat.Lte], [Rat.Gsm, Rat.Umts],
+                [Rat.Umts, Rat.Lte], [Rat.Gsm, Rat.Lte], [Rat.Gsm, Rat.Umts, Rat.Lte],
+            ];
             if (!TryInt(f[0], out int act) || act < 0 || act >= modes.Length) return null;
             string? preferred = TryInt(f[1], out int p) && p >= 0 && p < modes.Length ? modes[p] : null;
-            List<int> gsm = new List<int>(), umts = new List<int>(), lte = new List<int>();
+            List<int> gsm = [], umts = [], lte = [];
             foreach (string v in f.Skip(3))
             {
                 if (!TryInt(v, out int n)) continue;
@@ -85,7 +80,7 @@ namespace WwanProbe.Infrastructure.Modem
                 GsmBands = gsm,         // MHz values (900, 1800, ...)
                 UmtsBands = umts,       // UTRA band numbers
                 LteBands = lte,         // E-UTRA band numbers
-                NrBands = Array.Empty<int>(), // XMM 7560 is LTE only
+                NrBands = [], // XMM 7560 is LTE only
             };
         }
 
@@ -98,10 +93,10 @@ namespace WwanProbe.Infrastructure.Modem
         // Returns the cells in the common AT cell shape (AtProfile).
         public static List<AtCell> ParseXmci(string? response)
         {
-            List<AtCell> cells = new List<AtCell>();
-            foreach (string line in Regex.Split(response ?? "", "\r?\n"))
+            List<AtCell> cells = [];
+            foreach (string line in AtResponse.Lines(response ?? ""))
             {
-                Match m = XmciLine.Match(line);
+                Match m = XmciLine().Match(line);
                 if (!m.Success) continue;
                 string[] f = m.Groups[1].Value.Split(',');
                 if (!TryInt(f[0], out int type) || type < 0 || type > 5) continue;
@@ -137,18 +132,21 @@ namespace WwanProbe.Infrastructure.Modem
 
         private static long? ParseXmciHex(string text)
         {
-            Match m = XmciHexText.Match(text.Trim('"'));
+            Match m = XmciHexText().Match(text.Trim('"'));
             if (!m.Success) return null;
             uint value = Convert.ToUInt32(m.Groups[1].Value, 16);
-            if (value == XmciInvalid) return null;
-            return value;
+            return value == XmciInvalid ? null : value;
         }
 
         private static long? ParseXmciNumber(string text)
         {
             string t = text.Trim('"');
-            if (t.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) return ParseXmciHex(t);
-            return TryInt(t, out int n) ? n : null;
+            return t.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? ParseXmciHex(t) : ParseXmciDecimal(t);
         }
+
+        private static long? ParseXmciDecimal(string text) => TryInt(text, out int n) ? n : null;
+
+        [GeneratedRegex(@"^\+XMCI:\s*(.+)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+        private static partial Regex XmciLine();
     }
 }

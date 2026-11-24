@@ -8,10 +8,10 @@ namespace WwanProbe.Application
     // One row per sample, including samples without an LTE serving cell (cell columns empty),
     // so gaps stay visible. Cell columns are PrimaryCell; CA SecondaryCells
     // cells are '+'-joined lists in the SCell_* columns. Unavailable values are empty.
-    public static class SnapshotLog
+    internal static class SnapshotLog
     {
-        public static readonly IReadOnlyList<string> Columns = new[]
-        {
+        public static readonly IReadOnlyList<string> Columns =
+        [
             "Timestamp",
             "RSRP_dBm", "RSRQ_dB", "RSSNR_dB",
             "Band", "EARFCN", "PCI", "CellID", "TAC", "TA",
@@ -24,7 +24,7 @@ namespace WwanProbe.Application
             "Error",
             "GPS_Status", "GPS_Source", "GPS_Timestamp_UTC", "GPS_Latitude", "GPS_Longitude",
             "GPS_Altitude_m", "GPS_Accuracy_m", "GPS_Speed_mps", "GPS_Heading_deg", "GPS_HDOP", "GPS_Error",
-        };
+        ];
 
         public static void Initialize(string path) => CsvFile.Initialize(path, Columns);
 
@@ -40,18 +40,17 @@ namespace WwanProbe.Application
             static string? Join<T>(IEnumerable<T>? items)
             {
                 List<T> list = items?.ToList() ?? new List<T>();
-                if (list.Count == 0) return null;
-                return string.Join('+', list.Select(i => Convert.ToString(i, CultureInfo.InvariantCulture) ?? ""));
+                return list.Count == 0 ? null : string.Join('+', list.Select(i => Convert.ToString(i, CultureInfo.InvariantCulture) ?? ""));
             }
 
             ServingCell? p = s.PrimaryCell;
             IReadOnlyList<ServingCell> sc = s.SecondaryCells;
-            List<string> errors = new List<string>();
+            List<string> errors = [];
             if (!string.IsNullOrEmpty(s.Error)) errors.Add($"WinRT: {s.Error}");
             if (!string.IsNullOrEmpty(s.AtError)) errors.Add($"AT: {s.AtError}");
             if (!string.IsNullOrEmpty(s.TrafficError)) errors.Add($"Traffic: {s.TrafficError}");
 
-            Dictionary<string, object?> row = new Dictionary<string, object?>
+            Dictionary<string, object?> row = new()
             {
                 ["Timestamp"] = s.Timestamp,
                 ["RSSNR_dB"] = s.Rssnr,
@@ -69,7 +68,7 @@ namespace WwanProbe.Application
                 ["BW_Mbps"] = s.BwMbps,
                 ["Temp_C"] = s.TempC,
                 ["Downgrade"] = s.Downgrade?.Level.ToString(),
-                ["Downgrade_Reason"] = string.Join("; ", s.Downgrade?.Reasons ?? Array.Empty<string>()),
+                ["Downgrade_Reason"] = string.Join("; ", s.Downgrade?.Reasons ?? []),
                 ["Error"] = string.Join("; ", errors),
                 ["GPS_Status"] = s.Gps?.Status,
                 ["GPS_Source"] = s.Gps?.Source,

@@ -6,7 +6,7 @@ using WwanProbe.Infrastructure.Modem;
 namespace WwanProbe.Application
 {
     // Device header shown on every frame; read once at startup.
-    public sealed record ModemSummary
+    internal sealed record ModemSummary
     {
         public string Model { get; init; } = "";
         public string Manufacturer { get; init; } = "";
@@ -49,7 +49,7 @@ namespace WwanProbe.Application
     // All consumers use these roles instead of selecting by measurement availability.
     // Missing values stay null; Error, AtError and TrafficError identify failed sources.
     // Gps / Satellites are null unless -Gps / -Nmea started their receivers.
-    public sealed class LteSnapshot
+    internal sealed class LteSnapshot
     {
         public string Timestamp { get; set; } = "";
         public string ProviderName { get; set; } = "";
@@ -59,10 +59,10 @@ namespace WwanProbe.Application
         public double? BwMbps { get; set; }
         public double? RxKB { get; set; }
         public double? TxKB { get; set; }
-        public IReadOnlyList<ServingCell> Serving { get; set; } = Array.Empty<ServingCell>();
+        public IReadOnlyList<ServingCell> Serving { get; set; } = [];
         public ServingCell? PrimaryCell { get; set; }
-        public IReadOnlyList<ServingCell> SecondaryCells { get; set; } = Array.Empty<ServingCell>();
-        public IReadOnlyList<UmtsCell> Umts { get; set; } = Array.Empty<UmtsCell>();
+        public IReadOnlyList<ServingCell> SecondaryCells { get; set; } = [];
+        public IReadOnlyList<UmtsCell> Umts { get; set; } = [];
         public IReadOnlyList<LteNeighbor>? Neighbors { get; set; }
         public double? TempC { get; set; }
         public double? Rssnr { get; set; }
@@ -77,8 +77,8 @@ namespace WwanProbe.Application
         public static LteSnapshot Take(IModemDevice modem, ModemAt? at, ITrafficCounter traffic, GpsSource? gps, NmeaReceiver? nmea)
         {
             ModemObservation o = ModemObservation.Observe(modem, at, traffic);
-            List<ServingCell> serving = o.Serving.Select(c => c with { Quality = SignalQuality.FromRsrp(c.RsrpDbm) }).ToList();
-            LteSnapshot snapshot = new LteSnapshot
+            List<ServingCell> serving = [.. o.Serving.Select(c => c with { Quality = SignalQuality.FromRsrp(c.RsrpDbm) })];
+            LteSnapshot snapshot = new()
             {
                 Timestamp = o.Timestamp,
                 ProviderName = o.ProviderName,
@@ -90,7 +90,7 @@ namespace WwanProbe.Application
                 TxKB = o.TxKB,
                 Serving = serving,
                 PrimaryCell = serving.FirstOrDefault(),
-                SecondaryCells = serving.Skip(1).ToList(),
+                SecondaryCells = [.. serving.Skip(1)],
                 Umts = o.Umts,
                 Neighbors = o.Neighbors,
                 TempC = o.TempC,

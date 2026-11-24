@@ -7,12 +7,27 @@
     <RootNamespace>WwanProbe</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- LibraryImport (SYSLIB1054) generates its marshalling code with unsafe blocks. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- P/Invoke targets (kernel32.dll, pdh.dll) load from System32 only (CA5392). -->
+    <AssemblyAttribute Include="System.Runtime.InteropServices.DefaultDllImportSearchPathsAttribute">
+      <_Parameter1>System.Runtime.InteropServices.DllImportSearchPath.System32</_Parameter1>
+      <_Parameter1_IsLiteral>true</_Parameter1_IsLiteral>
+    </AssemblyAttribute>
+  </ItemGroup>
 
   <ItemGroup>
     <!-- The test project lives below this one. -->
     <Compile Remove="cs-wwan-probe.Tests/**" />
     <None Remove="cs-wwan-probe.Tests/**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Types are internal (CA1515); the tests reach them through this. -->
+    <InternalsVisibleTo Include="cs-wwan-probe.Tests" />
   </ItemGroup>
 
   <ItemGroup>

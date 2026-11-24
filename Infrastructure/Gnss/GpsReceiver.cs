@@ -4,7 +4,7 @@ namespace WwanProbe.Infrastructure.Gnss
 {
     // Plain copy of a WinRT Geocoordinate (taken in the position callback), so normalization and
     // tests do not depend on WinRT objects.
-    public sealed record GpsCoordinate
+    internal sealed record GpsCoordinate
     {
         public string PositionSource { get; init; } = "";
         public bool IsRemoteSource { get; init; }
@@ -54,13 +54,13 @@ namespace WwanProbe.Infrastructure.Gnss
         }
     }
 
-    public sealed record GpsReading(string Status, GpsCoordinate? Coordinate, string? Error);
+    internal sealed record GpsReading(string Status, GpsCoordinate? Coordinate, string? Error);
 
     // WinRT callbacks run on their own threads. Keep only the latest report, including during
     // pause, so GPS acquisition never blocks LTE sampling or the UI.
-    public sealed class GpsReceiver : IDisposable
+    internal sealed class GpsReceiver : IDisposable
     {
-        private readonly object gate = new object();
+        private readonly Lock gate = new();
         private readonly Geolocator locator;
         private GpsCoordinate? coordinate;
         private string status = "Initializing";
@@ -113,7 +113,10 @@ namespace WwanProbe.Infrastructure.Gnss
 
         public GpsReading Read()
         {
-            lock (gate) return new GpsReading(status, coordinate, error);
+            lock (gate)
+            {
+                return new GpsReading(status, coordinate, error);
+            }
         }
 
         public void Dispose()

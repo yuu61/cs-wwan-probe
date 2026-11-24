@@ -1,20 +1,12 @@
 namespace WwanProbe.Infrastructure.Modem
 {
     // Wire-format signal values normalized to dBm / dB (pure, no I/O).
-    public static class SignalConversion
+    internal static class SignalConversion
     {
         // 3GPP TS 36.133 index -> dBm/dB conversion (AT+XMCI / +XCESQ / +GTCCINFO / +CESQ use this scale)
-        public static int? RsrpIndexToDbm(long index)
-        {
-            if (index < 0 || index > 97) return null;
-            return (int)(-141 + index);
-        }
+        public static int? RsrpIndexToDbm(long index) => index is < 0 or > 97 ? null : (int)(-141 + index);
 
-        public static double? RsrqIndexToDb(long index)
-        {
-            if (index < 0 || index > 34) return null;
-            return -20 + 0.5 * index;
-        }
+        public static double? RsrqIndexToDb(long index) => index is < 0 or > 34 ? null : -20 + (0.5 * index);
 
         // WinRT MobileBroadbandCellLte RSRP / RSRQ -> dBm / dB, or null.
         // The MBIM spec (MBIM_LTE_SERVING_CELL_INFO / MBIM_LTE_MRL_INFO) defines RSRP -140..-44 dBm and
@@ -22,18 +14,22 @@ namespace WwanProbe.Infrastructure.Modem
         // The ranges do not overlap, so both are accepted.
         public static int? FromWinRtRsrp(double? value)
         {
-            if (value is not double v) return null;
-            if (v >= -140 && v <= -44) return (int)Math.Round(v);
-            if (v >= 0 && v <= 97 && v == Math.Floor(v)) return RsrpIndexToDbm((long)v);
-            return null;
+            return value switch
+            {
+                double v when v is >= -140 and <= -44 => (int)Math.Round(v),
+                double v when v is >= 0 and <= 97 && v == Math.Floor(v) => RsrpIndexToDbm((long)v),
+                _ => null,
+            };
         }
 
         public static double? FromWinRtRsrq(double? value)
         {
-            if (value is not double v) return null;
-            if (v >= -20 && v <= -3) return v;
-            if (v >= 0 && v <= 34 && v == Math.Floor(v)) return RsrqIndexToDb((long)v);
-            return null;
+            return value switch
+            {
+                double v when v is >= -20 and <= -3 => v,
+                double v when v is >= 0 and <= 34 && v == Math.Floor(v) => RsrqIndexToDb((long)v),
+                _ => null,
+            };
         }
     }
 }

@@ -8,28 +8,27 @@ namespace WwanProbe.Infrastructure.Modem
     // Reference: FM350 AT Commands User Manual V2.10 (see docs/modem-support.md). Number bases of
     // +GTCCINFO fields were taken from real FM350 output (TAC / cell ID hex, EARFCN / PCI decimal).
     // Not verified on hardware. Every parser returns null when the response is missing or "ERROR".
-    public static class FibocomStatus
+    internal static partial class FibocomStatus
     {
-        private static readonly Regex GtccinfoPrefix = new Regex(@"^\+GTCCINFO:\s*", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-        private static readonly Regex GtccinfoData = new Regex(@"^[12],\d+,", RegexOptions.CultureInvariant);
-        private static readonly Regex GtcainfoLine = new Regex(@"^\s*(?:\+GTCAINFO:\s*)?(PCC|SCC\s*\d*)\s*:\s*(.+?)\s*$",
-            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-        private static readonly Regex NrBand = new Regex(@"^50(\d+)$", RegexOptions.CultureInvariant);
+        [GeneratedRegex(@"^[12],\d+,", RegexOptions.CultureInvariant)]
+        private static partial Regex GtccinfoData();
+        [GeneratedRegex(@"^\s*(?:\+GTCAINFO:\s*)?(PCC|SCC\s*\d*)\s*:\s*(.+?)\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+        private static partial Regex GtcainfoLine();
+        [GeneratedRegex(@"^50(\d+)$", RegexOptions.CultureInvariant)]
+        private static partial Regex NrBand();
 
         // +GTCCINFO rsrp / rsrq index -> dBm / dB, or null. rsrp 0 means "below -140 dBm or not detectable"
         // and is treated as not measured; 255 = unknown for both.
         private static int? RsrpIndex(string? text)
         {
             long? v = AtResponse.ParseInt(text);
-            if (v is not long n || n <= 0) return null;
-            return SignalConversion.RsrpIndexToDbm(n);
+            return v is not long n || n <= 0 ? null : SignalConversion.RsrpIndexToDbm(n);
         }
 
         private static double? RsrqIndex(string? text)
         {
             long? v = AtResponse.ParseInt(text);
-            if (v is not long n || n < 0) return null;
-            return SignalConversion.RsrqIndexToDb(n);
+            return v is not long n || n < 0 ? null : SignalConversion.RsrqIndexToDb(n);
         }
 
         // AT+GTCCINFO? -> cells. Data lines follow "+GTCCINFO:" without a prefix (optionally after
@@ -42,12 +41,12 @@ namespace WwanProbe.Infrastructure.Modem
         public static List<AtCell>? ParseGtccinfo(string? response)
         {
             if (!AtResponse.IsOk(response) || !response!.Contains("+GTCCINFO:", StringComparison.OrdinalIgnoreCase)) return null;
-            List<AtCell> cells = new List<AtCell>();
-            foreach (string raw in Regex.Split(response, "\r?\n"))
+            List<AtCell> cells = [];
+            foreach (string raw in AtResponse.Lines(response))
             {
-                string line = GtccinfoPrefix.Replace(raw, "").Trim();
-                if (!GtccinfoData.IsMatch(line)) continue;
-                string[] f = line.Split(',').Select(x => x.Trim()).ToArray();
+                string line = GtccinfoPrefix().Replace(raw, "").Trim();
+                if (!GtccinfoData().IsMatch(line)) continue;
+                string[] f = [.. line.Split(',').Select(x => x.Trim())];
                 if (f.Length < 8) continue;
                 bool serving = f[0] == "1";
                 CellRole role = serving ? CellRole.Serving : CellRole.Neighbor;
@@ -63,7 +62,7 @@ namespace WwanProbe.Infrastructure.Modem
                     case "4":
                         int i = serving ? 12 : 10; // rsrp index position
                         if (f.Length <= i + 1) break;
-                        AtCell cell = new AtCell
+                        AtCell cell = new()
                         {
                             Rat = Rat.Lte,
                             Role = role,
@@ -86,6 +85,9 @@ namespace WwanProbe.Infrastructure.Modem
                         }
                         cells.Add(cell);
                         break;
+                    default:
+                        // Undocumented RAT codes: skipped.
+                        break;
                 }
             }
             return cells;
@@ -100,12 +102,12 @@ namespace WwanProbe.Infrastructure.Modem
         {
             if (!AtResponse.IsOk(response)) return null;
             bool pcc = false;
-            List<double?> bandwidths = new List<double?>();
-            foreach (string line in Regex.Split(response!, "\r?\n"))
+            List<double?> bandwidths = [];
+            foreach (string line in AtResponse.Lines(response!))
             {
-                Match m = GtcainfoLine.Match(line);
+                Match m = GtcainfoLine().Match(line);
                 if (!m.Success) continue;
-                string[] f = m.Groups[2].Value.Split(',').Select(x => x.Trim()).ToArray();
+                string[] f = [.. m.Groups[2].Value.Split(',').Select(x => x.Trim())];
                 bool isPcc = string.Equals(m.Groups[1].Value, "PCC", StringComparison.OrdinalIgnoreCase);
                 int o = isPcc ? 0 : 2; // offset of <band>
                 if (f.Length <= o + 3) continue;
@@ -122,8 +124,7 @@ namespace WwanProbe.Infrastructure.Modem
                     bandwidths.Add(mhz);
                 }
             }
-            if (!pcc) return null;
-            return new CarrierAggregation(bandwidths.Count, bandwidths);
+            return !pcc ? null : new CarrierAggregation(bandwidths.Count, bandwidths);
         }
 
         // AT+GTSENRDTEMP=1 -> "+GTSENRDTEMP: <sensor_id>,<temperature>" (sensor 1 = soc_max).
@@ -135,8 +136,7 @@ namespace WwanProbe.Infrastructure.Modem
             long? v = AtResponse.ParseInt(lines[0][1]);
             if (v is not long n) return null;
             double c = Math.Round(n / 1000.0, 1);
-            if (c < -40 || c > 125) return null;
-            return c;
+            return c is < -40 or > 125 ? null : c;
         }
 
         // AT+GTACT? -> "+GTACT: <rat>,<PreferredAct1>,<PreferredAct2>,<band>,..." -> RatConfig (see IntelStatus.ParseXact).
@@ -147,7 +147,7 @@ namespace WwanProbe.Infrastructure.Modem
         {
             string[]? f = AtResponse.GetField(response, "GTACT");
             if (f is null || f.Length < 1) return null;
-            Dictionary<long, string> rats = new Dictionary<long, string>
+            Dictionary<long, string> rats = new()
             {
                 [1] = "3G",
                 [2] = "4G",
@@ -158,25 +158,25 @@ namespace WwanProbe.Infrastructure.Modem
                 [17] = "4G+5G",
                 [20] = "3G+4G+5G",
             };
-            Dictionary<long, string[]> ratSets = new Dictionary<long, string[]>
+            Dictionary<long, string[]> ratSets = new()
             {
-                [1] = new[] { Rat.Umts },
-                [2] = new[] { Rat.Lte },
-                [4] = new[] { Rat.Umts, Rat.Lte },
-                [10] = new[] { Rat.Umts, Rat.Lte, Rat.Nr },
-                [14] = new[] { Rat.Nr },
-                [16] = new[] { Rat.Umts, Rat.Nr },
-                [17] = new[] { Rat.Lte, Rat.Nr },
-                [20] = new[] { Rat.Umts, Rat.Lte, Rat.Nr },
+                [1] = [Rat.Umts],
+                [2] = [Rat.Lte],
+                [4] = [Rat.Umts, Rat.Lte],
+                [10] = [Rat.Umts, Rat.Lte, Rat.Nr],
+                [14] = [Rat.Nr],
+                [16] = [Rat.Umts, Rat.Nr],
+                [17] = [Rat.Lte, Rat.Nr],
+                [20] = [Rat.Umts, Rat.Lte, Rat.Nr],
             };
-            Dictionary<long, string> prefs = new Dictionary<long, string> { [2] = "3G", [3] = "4G", [6] = "5G" };
+            Dictionary<long, string> prefs = new() { [2] = "3G", [3] = "4G", [6] = "5G" };
             long? rat = AtResponse.ParseInt(f[0]);
-            if (rat is not long r || !rats.ContainsKey(r)) return null;
+            if (rat is not long r || !rats.TryGetValue(r, out string? value)) return null;
             long? pref = f.Length > 1 ? AtResponse.ParseInt(f[1]) : null;
-            List<int> umts = new List<int>(), lte = new List<int>(), nr = new List<int>();
+            List<int> umts = [], lte = [], nr = [];
             foreach (string text in f.Skip(3))
             {
-                Match m = NrBand.Match(text);
+                Match m = NrBand().Match(text);
                 if (m.Success)
                 {
                     nr.Add(int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture));
@@ -184,19 +184,22 @@ namespace WwanProbe.Infrastructure.Modem
                 }
                 long? n = AtResponse.ParseInt(text);
                 if (n is not long b || b <= 0) continue;
-                if (b > 100 && b < 200) lte.Add((int)(b - 100));
+                if (b is > 100 and < 200) lte.Add((int)(b - 100));
                 else if (b < 100) umts.Add((int)b);
             }
             return new RatConfig
             {
                 AllowedRats = ratSets[r],
-                Allowed = rats[r],
+                Allowed = value,
                 Preferred = pref is long p && prefs.TryGetValue(p, out string? text2) ? text2 : null,
-                GsmBands = Array.Empty<int>(),
+                GsmBands = [],
                 UmtsBands = umts,
                 LteBands = lte,
                 NrBands = nr,
             };
         }
+
+        [GeneratedRegex(@"^\+GTCCINFO:\s*", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+        private static partial Regex GtccinfoPrefix();
     }
 }

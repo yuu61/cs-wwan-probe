@@ -1,20 +1,23 @@
 namespace WwanProbe.Domain
 {
     // Signal classification and statistics (pure, no I/O).
-    public static class SignalQuality
+    internal static class SignalQuality
     {
         public static string? FromRsrp(double? dbm)
         {
-            if (dbm is not double v) return null;
-            if (v >= -80) return "Excellent";
-            if (v >= -90) return "Good";
-            if (v >= -100) return "Fair";
-            if (v >= -110) return "Poor";
-            return "Very Poor";
+            return dbm switch
+            {
+                null => null,
+                >= -80 => "Excellent",
+                >= -90 => "Good",
+                >= -100 => "Fair",
+                >= -110 => "Poor",
+                _ => "Very Poor",
+            };
         }
     }
 
-    public sealed record SignalStatistic(double Min, double Max, double Avg, int Count)
+    internal sealed record SignalStatistic(double Min, double Max, double Avg, int Count)
     {
         // Min/Max/Avg of a signal series; NaN (missing sample) is ignored. Null without valid samples.
         public static SignalStatistic? Compute(IEnumerable<double> values)
@@ -29,8 +32,7 @@ namespace WwanProbe.Domain
                 sum += v;
                 count++;
             }
-            if (count == 0) return null;
-            return new SignalStatistic(min, max, Math.Round(sum / count, 1), count);
+            return count == 0 ? null : new SignalStatistic(min, max, Math.Round(sum / count, 1), count);
         }
     }
 }

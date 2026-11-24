@@ -7,21 +7,24 @@ namespace WwanProbe.Tests
     // The TUI loop with a real background sampler and simulated console input/output.
     public class TuiResponsivenessTests
     {
-        private static MonitorSampler Sampler(int delayMs) => new MonitorSampler(() =>
+        private static MonitorSampler Sampler(int delayMs)
         {
-            Thread.Sleep(delayMs);
-            return new LteSnapshot
+            return new MonitorSampler(() =>
             {
-                Timestamp = "test",
-                PrimaryCell = new ServingCell { RsrpDbm = -90, RsrqDb = -10 },
-                Rssnr = 10,
-                RxKB = 1,
-                TxKB = 2,
-                TempC = 30,
-            };
-        });
+                Thread.Sleep(delayMs);
+                return new LteSnapshot
+                {
+                    Timestamp = "test",
+                    PrimaryCell = new ServingCell { RsrpDbm = -90, RsrqDb = -10 },
+                    Rssnr = 10,
+                    RxKB = 1,
+                    TxKB = 2,
+                    TempC = 30,
+                };
+            });
+        }
 
-        private static MonitorView View() => new MonitorView { RefreshRequested = true, Dirty = true };
+        private static MonitorView View() => new() { RefreshRequested = true, Dirty = true };
 
         // Arrow repeats, visibility, pause and refresh must be processed before the first
         // slow sample finishes. Quit also must return from the UI loop while it is pending.
@@ -31,7 +34,7 @@ namespace WwanProbe.Tests
             MonitorSampler sampler = Sampler(2000);
             MonitorSession session = Fixtures.Session();
             MonitorView view = View();
-            FakeTerminal terminal = new FakeTerminal();
+            FakeTerminal terminal = new();
             int frames = 0;
             terminal.OnFrame = (s, v) =>
             {
@@ -71,7 +74,7 @@ namespace WwanProbe.Tests
                 MonitorSession session = Fixtures.Session(count: 3, interval: 60, csvPath: csvPath);
                 SnapshotLog.Initialize(csvPath);
                 MonitorView view = View();
-                FakeTerminal terminal = new FakeTerminal();
+                FakeTerminal terminal = new();
                 int stage = 0;
                 terminal.OnFrame = (s, v) =>
                 {
@@ -121,7 +124,7 @@ namespace WwanProbe.Tests
             session.DowngradeLog.AlertCount = 3;
             MonitorView view = View();
             view.HandoverOffset = 4;
-            FakeTerminal terminal = new FakeTerminal();
+            FakeTerminal terminal = new();
             int stage = 0;
             terminal.OnFrame = (s, v) =>
             {
@@ -150,7 +153,8 @@ namespace WwanProbe.Tests
                 }
             };
             TuiMonitor.Loop(session, view, sampler, terminal);
-            Assert.True(stage == 3 && session.Iteration == 4, "Reset or refresh sequence did not complete.");
+            Assert.Equal(3, stage);
+            Assert.Equal(4, session.Iteration);
         }
 
         // Interval=0 must keep sampling, but never start concurrent requests.
@@ -162,20 +166,20 @@ namespace WwanProbe.Tests
             TuiMonitor.Loop(session, View(), sampler, new FakeTerminal());
             Assert.True(session.Iteration == 2 && session.History["Rsrp"].Count == 2, "Interval=0 failed.");
             sampler.Start();
-            Assert.Throws<InvalidOperationException>(() => sampler.Start());
+            _ = Assert.Throws<InvalidOperationException>(sampler.Start);
         }
 
         // Worker errors must be surfaced, and the pending sample must be released.
         [Fact]
         public void WorkerErrorPropagationAndCleanup()
         {
-            MonitorSampler sampler = new MonitorSampler(() => throw new InvalidOperationException("test failure"));
+            MonitorSampler sampler = new(() => throw new InvalidOperationException("test failure"));
             sampler.Start();
             Assert.True(SpinWait.SpinUntil(() => sampler.IsCompleted, 5000));
-            InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() => sampler.Receive());
+            InvalidOperationException ex = Assert.Throws<InvalidOperationException>(sampler.Receive);
             Assert.Equal("test failure", ex.Message);
             Assert.Null(sampler.Pending);
-            Assert.Throws<InvalidOperationException>(() => sampler.Receive());
+            _ = Assert.Throws<InvalidOperationException>(sampler.Receive);
         }
     }
 }

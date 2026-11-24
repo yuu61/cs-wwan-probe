@@ -9,7 +9,7 @@ namespace WwanProbe.Infrastructure.Gnss
     // GNSS driver handle for the NMEA helper (the interface ACL requires an administrator).
     // It only switches NMEA logging and listens to it: Windows keeps the fix session
     // (Geolocator), so no native fix session is started alongside it.
-    public sealed class GnssDevice : IDisposable
+    internal sealed partial class GnssDevice : IDisposable
     {
         private const uint IoctlGetDeviceCapability = 0x220008;
         private const uint IoctlExecuteDriverCommand = 0x22000C;
@@ -27,23 +27,28 @@ namespace WwanProbe.Infrastructure.Gnss
             public IntPtr Event;
         }
 
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        private static extern SafeFileHandle CreateFile(string name, uint access, uint share,
+        [LibraryImport("kernel32.dll", EntryPoint = "CreateFileW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+        private static partial SafeFileHandle CreateFile(string name, uint access, uint share,
             IntPtr security, uint disposition, uint flags, IntPtr template);
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool DeviceIoControl(SafeFileHandle handle, uint code,
+        [LibraryImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static partial bool DeviceIoControl(SafeFileHandle handle, uint code,
             IntPtr input, uint inputSize, IntPtr output, uint outputSize, out uint returned, IntPtr overlapped);
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern IntPtr CreateEvent(IntPtr security, bool manual, bool initial, IntPtr name);
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern uint WaitForSingleObject(IntPtr handle, uint timeout);
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool GetOverlappedResult(SafeFileHandle handle, IntPtr overlapped,
-            out uint transferred, bool wait);
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool CancelIoEx(SafeFileHandle handle, IntPtr overlapped);
-        [DllImport("kernel32.dll")]
-        private static extern bool CloseHandle(IntPtr handle);
+        [LibraryImport("kernel32.dll", EntryPoint = "CreateEventW", SetLastError = true)]
+        private static partial IntPtr CreateEvent(IntPtr security, [MarshalAs(UnmanagedType.Bool)] bool manual,
+            [MarshalAs(UnmanagedType.Bool)] bool initial, IntPtr name);
+        [LibraryImport("kernel32.dll", SetLastError = true)]
+        private static partial uint WaitForSingleObject(IntPtr handle, uint timeout);
+        [LibraryImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static partial bool GetOverlappedResult(SafeFileHandle handle, IntPtr overlapped,
+            out uint transferred, [MarshalAs(UnmanagedType.Bool)] bool wait);
+        [LibraryImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static partial bool CancelIoEx(SafeFileHandle handle, IntPtr overlapped);
+        [LibraryImport("kernel32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static partial bool CloseHandle(IntPtr handle);
 
         public GnssDevice(string devicePath)
         {
@@ -83,7 +88,7 @@ namespace WwanProbe.Infrastructure.Gnss
             BitConverter.GetBytes((uint)13).CopyTo(command, 8); // GNSS_SetNMEALogging
             BitConverter.GetBytes((uint)4).CopyTo(command, 16);
             BitConverter.GetBytes(enabled ? (uint)255 : 0).CopyTo(command, 532);
-            Control(IoctlExecuteDriverCommand, command, 0, 3000, out bool timedOut);
+            _ = Control(IoctlExecuteDriverCommand, command, 0, 3000, out bool timedOut);
             if (timedOut) throw new TimeoutException("The GNSS driver did not accept the NMEA logging command.");
         }
 
@@ -95,7 +100,9 @@ namespace WwanProbe.Infrastructure.Gnss
             if (timedOut) return null;
             // GNSS_EVENT: EventType (13 = NMEA data) at 8, union at 528; GNSS_NMEA_DATA header is 8 bytes.
             if (data.Length < 800 || BitConverter.ToUInt32(data, 8) != 13 || BitConverter.ToUInt32(data, 12) < 264)
+            {
                 throw new InvalidOperationException("Invalid GNSS NMEA event.");
+            }
             int length = Array.IndexOf(data, (byte)0, 536, 256);
             return Encoding.ASCII.GetString(data, 536, (length < 0 ? 792 : length) - 536);
         }
@@ -131,15 +138,18 @@ namespace WwanProbe.Infrastructure.Gnss
                     if (wait != 0)
                     {
                         timedOut = wait == WaitTimeout;
-                        CancelIoEx(handle, overlapped);
+                        _ = CancelIoEx(handle, overlapped);
                     }
                     ok = GetOverlappedResult(handle, overlapped, out returned, true);
                     error = ok ? 0 : Marshal.GetLastWin32Error();
                     // Completed before the cancellation took effect: keep the data.
                     if (ok) timedOut = false;
                 }
-                if (timedOut) return Array.Empty<byte>();
-                if (!ok) throw new Win32Exception(error, string.Format(CultureInfo.InvariantCulture, "GNSS IOCTL 0x{0:X} failed (Win32 error {1}).", code, error));
+                if (timedOut) return [];
+                if (!ok)
+                {
+                    throw new Win32Exception(error, string.Format(CultureInfo.InvariantCulture, "GNSS IOCTL 0x{0:X} failed (Win32 error {1}).", code, error));
+                }
                 if (returned > outputSize) throw new InvalidOperationException("Invalid GNSS driver response size.");
                 byte[] data = new byte[returned];
                 if (data.Length > 0) Marshal.Copy(output, data, 0, data.Length);
@@ -148,7 +158,7 @@ namespace WwanProbe.Infrastructure.Gnss
             finally
             {
                 if (overlapped != IntPtr.Zero) Marshal.FreeHGlobal(overlapped);
-                if (signal != IntPtr.Zero) CloseHandle(signal);
+                if (signal != IntPtr.Zero) _ = CloseHandle(signal);
                 if (output != IntPtr.Zero) Marshal.FreeHGlobal(output);
                 if (source != IntPtr.Zero) Marshal.FreeHGlobal(source);
             }

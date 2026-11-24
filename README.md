@@ -129,7 +129,12 @@ dotnet format cs-wwan-probe.slnx --verify-no-changes        # 整形が必要な
 
 - テストはモデムの代わりに `IModemDevice` (WinRT と AT の送受信) と `ITrafficCounter` (通信量) の疑似実装を使い、本体の観測・snapshot・履歴・CSV・画面の処理をそのまま通します。AT の応答はマニュアルの例と L860-GL の実機応答をフィクスチャにしています
 - TUI のループは `ITuiTerminal`、描画は `IConsoleSurface` を差し替えてテストします
-- コードスタイルは `.editorconfig` にあります (明示的な型、ブロック形式の名前空間、名前空間の外の using)
+- コードスタイルは `.editorconfig` にあります (明示的な型、ブロック形式の名前空間、名前空間の外の using、1 行に収まる本体は波括弧なし・複数行は波括弧必須、1 行に収まるメソッドは `=>`)
+- 静的解析は全ルール有効です (`Directory.Build.props`: `AnalysisLevel=latest-all`、ビルド時のコードスタイル検査、警告はエラー扱い。`.editorconfig`: 全アナライザーを warning)。`dotnet build` が警告 0 で通ることと `dotnet format --verify-no-changes` が通ることの両方を確認します (JSON002 などエディター専用のルールは `dotnet format` だけが検査します)
+- インラインの抑制 (`#pragma warning disable`、`[SuppressMessage]`、`#nullable disable`) はビルドエラーです (`Directory.Build.targets`)。違反はコードを直します。ルールを満たせない箇所だけ、理由を付けて `GlobalSuppressions.cs` (1 メンバー単位) か `.editorconfig` (ファイル範囲) に置きます
+  - CA1031 (汎用例外の catch) は `Infrastructure/` と `Program.cs` で無効です。WinRT・MBIM・COM ポート・PDH・昇格ヘルパーの失敗を、モニターを止めずに各サンプルのエラー文字列として報告する設計のためです
+  - テストプロジェクトでは CS1591 (XML ドキュメント) を無効にしています。xunit のテストクラスとメソッドは public である必要があるためです
+- 本体の型は `internal` です (CA1515)。テストからは `InternalsVisibleTo` で参照します
 
 ## ドキュメント
 

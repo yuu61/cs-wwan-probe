@@ -4,16 +4,16 @@ using WwanProbe.Application;
 namespace WwanProbe.Presentation
 {
     // What the TUI loop needs from the terminal (ConsoleTerminal on a real console, fakes in tests).
-    public interface ITuiTerminal
+    internal interface ITuiTerminal
     {
         ConsoleKeyInfo? ReadKey();
         bool IsWindowResized(MonitorView view);
         void Show(MonitorSession session, MonitorView view);
     }
 
-    public sealed class ConsoleTerminal : ITuiTerminal
+    internal sealed class ConsoleTerminal : ITuiTerminal
     {
-        private readonly ConsoleRenderer renderer = new ConsoleRenderer(new SystemConsole());
+        private readonly ConsoleRenderer renderer = new(new SystemConsole());
 
         public ConsoleKeyInfo? ReadKey() => Console.KeyAvailable ? Console.ReadKey(true) : null;
 
@@ -27,9 +27,9 @@ namespace WwanProbe.Presentation
     //       1-6 = show/hide one history chart, g = show/hide all charts,
     //       h = handover history, s = satellite list (-Nmea),
     //       Up / Down = chart height, newer / older handovers or scroll satellites
-    public static class TuiMonitor
+    internal static class TuiMonitor
     {
-        public static MonitorView NewView() => new MonitorView { Unicode = true, RefreshRequested = true, Dirty = true };
+        public static MonitorView NewView() => new() { Unicode = true, RefreshRequested = true, Dirty = true };
 
         // Drain queued keys on every tick, including during sampling. Coalesce key repeats
         // into one redraw so holding an arrow does not build up a queue of full frames.
@@ -73,7 +73,7 @@ namespace WwanProbe.Presentation
                     view.Dirty = true;
                     continue;
                 }
-                if (key.Key == ConsoleKey.UpArrow || key.Key == ConsoleKey.DownArrow)
+                if (key.Key is ConsoleKey.UpArrow or ConsoleKey.DownArrow)
                 {
                     int delta = key.Key == ConsoleKey.UpArrow ? -1 : 1;
                     if (view.SatelliteVisible)
@@ -152,7 +152,7 @@ namespace WwanProbe.Presentation
             bool inAltScreen = false;
             try
             {
-                MonitorSampler sampler = new MonitorSampler(session.TakeSnapshot);
+                MonitorSampler sampler = new(session.TakeSnapshot);
                 // Block glyphs (U+2581..U+2588) become '?' under the default CP932 output encoding.
                 Console.OutputEncoding = new UTF8Encoding(false);
                 savedMode = ConsoleMode.EnableVirtualTerminal();
@@ -178,17 +178,17 @@ namespace WwanProbe.Presentation
     }
 
     // Sequential (non-interactive) monitor loop for redirected stdin/stdout.
-    public static class PlainMonitor
+    internal static class PlainMonitor
     {
         public static void Run(MonitorSession session, CancellationToken cancel, int width = 100)
         {
-            MonitorView view = new MonitorView { Unicode = false };
+            MonitorView view = new() { Unicode = false };
             while (!cancel.IsCancellationRequested)
             {
                 session.Sample();
                 ConsoleRenderer.ShowPlainFrame(MonitorFrame.Build(session, view, width), Console.Out);
                 if (session.IsComplete) return;
-                cancel.WaitHandle.WaitOne(TimeSpan.FromSeconds(session.Config.Interval));
+                _ = cancel.WaitHandle.WaitOne(TimeSpan.FromSeconds(session.Config.Interval));
             }
         }
     }

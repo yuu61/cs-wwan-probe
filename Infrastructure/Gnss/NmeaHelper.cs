@@ -9,7 +9,7 @@ namespace WwanProbe.Infrastructure.Gnss
     // coordinates) to <StateDir>\state.json about once a second. Stops when <StateDir>\stop appears or the monitor
     // process ends, then restores NMEA logging to disabled and removes <StateDir>.
     // On a failure it keeps the state file with Status = Error for the monitor to show.
-    public static class NmeaHelper
+    internal static class NmeaHelper
     {
         // Arguments: <StateDir> <ParentId> <ParentStartTicks>.
         public static int Run(IReadOnlyList<string> args)
@@ -28,7 +28,7 @@ namespace WwanProbe.Infrastructure.Gnss
         {
             string statePath = Path.Combine(stateDir, "state.json");
             string stopPath = Path.Combine(stateDir, "stop");
-            NmeaHelperState state = new NmeaHelperState();
+            NmeaHelperState state = new();
             Process? parent = null;
             Mutex? nmeaLock = null;
             GnssDevice? device = null;
@@ -38,10 +38,13 @@ namespace WwanProbe.Infrastructure.Gnss
             try
             {
                 state.UpdatedUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                NmeaStateFile.Write(statePath, state);
+                _ = NmeaStateFile.Write(statePath, state);
                 // Holding the process object also guards against the parent ID being reused.
                 parent = Process.GetProcessById(parentId);
-                if (parent.StartTime.ToUniversalTime().Ticks != parentStartTicks) throw new InvalidOperationException("The monitor process has already exited.");
+                if (parent.StartTime.ToUniversalTime().Ticks != parentStartTicks)
+                {
+                    throw new InvalidOperationException("The monitor process has already exited.");
+                }
                 nmeaLock = GnssInterface.EnterNmeaLock();
                 IReadOnlyList<string> interfaces = GnssInterface.Find();
                 if (interfaces.Count == 0) throw new InvalidOperationException("No GNSS device interface found.");
@@ -52,7 +55,7 @@ namespace WwanProbe.Infrastructure.Gnss
                 loggingEnabled = true;
                 device.SetNmeaLogging(true);
                 state.Status = "Receiving";
-                NmeaSatelliteState satellites = new NmeaSatelliteState();
+                NmeaSatelliteState satellites = new();
                 string buffer = "";
                 Stopwatch published = Stopwatch.StartNew();
                 bool dirty = true;
@@ -71,7 +74,7 @@ namespace WwanProbe.Infrastructure.Gnss
                     if (dirty || published.ElapsedMilliseconds >= 1000)
                     {
                         NmeaReport report = satellites.Report(now);
-                        state.Satellites = report.Satellites.ToList();
+                        state.Satellites = [.. report.Satellites];
                         state.UsedCount = report.UsedCount;
                         state.Fix = report.Fix;
                         state.UpdatedUnixMs = now.ToUnixTimeMilliseconds();
@@ -102,7 +105,7 @@ namespace WwanProbe.Infrastructure.Gnss
                 finally
                 {
                     device?.Dispose();
-                    gps?.Stop();
+                    gps?.Dispose();
                     nmeaLock?.Dispose();
                     parent?.Dispose();
                     if (finished && state.Status != "Error")
@@ -113,7 +116,7 @@ namespace WwanProbe.Infrastructure.Gnss
                     else
                     {
                         state.UpdatedUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                        NmeaStateFile.Write(statePath, state);
+                        _ = NmeaStateFile.Write(statePath, state);
                     }
                 }
             }

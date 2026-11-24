@@ -8,7 +8,7 @@ namespace WwanProbe.Presentation
 {
     // One screen line: Text/Color with optional colored Segments (Text is then their concatenation).
     // GrayLevel (0-255) draws the text in that RGB gray instead of Color.
-    public sealed record FrameLine
+    internal sealed record FrameLine
     {
         public FrameLine(string text = "", ConsoleColor color = ConsoleColor.Gray, byte? grayLevel = null)
         {
@@ -20,21 +20,21 @@ namespace WwanProbe.Presentation
         public string Text { get; init; }
         public ConsoleColor Color { get; init; }
         public byte? GrayLevel { get; init; }
-        public IReadOnlyList<FrameLine> Segments { get; init; } = Array.Empty<FrameLine>();
+        public IReadOnlyList<FrameLine> Segments { get; init; } = [];
 
-        public static FrameLine FromSegments(ConsoleColor color, IReadOnlyList<FrameLine> segments) =>
-            new FrameLine(string.Concat(segments.Select(s => s.Text)), color) { Segments = segments };
+        public static FrameLine FromSegments(ConsoleColor color, IReadOnlyList<FrameLine> segments)
+            => new(string.Concat(segments.Select(s => s.Text)), color) { Segments = segments };
     }
 
     // Body lines plus the footer, which is pinned to the bottom row.
-    public sealed record Frame(List<FrameLine> Body, FrameLine Footer);
+    internal sealed record Frame(List<FrameLine> Body, FrameLine Footer);
 
     // View state owned by the monitor loop.
     // HandoverVisible / SatelliteVisible = the [h] / [s] view replaces the monitor body (at most one is set);
     // the offsets are the first shown row there.
     // Unicode = console accepts non-ASCII glyphs (TUI switches to UTF-8; plain output does not).
     // ChartRows = sparkline height in rows for Unicode charts (HistoryCharts.RowsMin..RowsMax).
-    public sealed class MonitorView
+    internal sealed class MonitorView
     {
         public bool Paused { get; set; }
         public bool Fetching { get; set; }
@@ -56,9 +56,8 @@ namespace WwanProbe.Presentation
 
     // Builds one screen as lines. Pure with respect to the console: no cursor / write operations here.
     // Sections with their own state or tables are in HistoryChart.cs, HandoverSection.cs and GnssSection.cs.
-    public static class MonitorFrame
+    internal static partial class MonitorFrame
     {
-        private static readonly Regex BandNumber = new Regex(@"^B(\d+)(?:/|$)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
         public static string SectionRule(string title, int width)
         {
@@ -66,11 +65,10 @@ namespace WwanProbe.Presentation
             return head + new string('-', Math.Max(0, width - head.Length));
         }
 
-        public static string Optional(object? value, string format) =>
-            value is null ? "n/a" : string.Format(CultureInfo.InvariantCulture, format, value);
+        public static string Optional(object? value, string format)
+            => value is null ? "n/a" : string.Format(CultureInfo.InvariantCulture, format, value);
 
-        public static string TrafficRate(double? valueKB) =>
-            valueKB is double kb ? HistoryCharts.FormatSi(kb * 1024, "B/s") : "n/a";
+        public static string TrafficRate(double? valueKB) => valueKB is double kb ? HistoryCharts.FormatSi(kb * 1024, "B/s") : "n/a";
 
         public static string CarrierAggregation(CarrierAggregation? ca)
         {
@@ -85,14 +83,14 @@ namespace WwanProbe.Presentation
         // EARFCN + PCI identifies duplicate observations across serving/neighbor lists.
         public static FrameLine LteBandLine(RatConfig rat, LteSnapshot? snapshot)
         {
-            Dictionary<string, int> counts = new Dictionary<string, int>();
-            HashSet<string> seen = new HashSet<string>();
+            Dictionary<string, int> counts = [];
+            HashSet<string> seen = [];
             IEnumerable<(string? Band, long? Earfcn, long? Pci)> cells =
-                (snapshot?.Serving ?? Array.Empty<ServingCell>()).Where(c => c is not null).Select(c => ((string?)c.Band, c.Earfcn, c.Pci))
-                .Concat((snapshot?.Neighbors ?? Array.Empty<LteNeighbor>()).Where(n => n is not null).Select(n => ((string?)n.Band, (long?)n.Earfcn, n.Pci)));
+                (snapshot?.Serving ?? []).Where(c => c is not null).Select(c => ((string?)c.Band, c.Earfcn, c.Pci))
+                .Concat((snapshot?.Neighbors ?? []).Where(n => n is not null).Select(n => ((string?)n.Band, (long?)n.Earfcn, n.Pci)));
             foreach ((string? bandText, long? earfcn, long? pci) in cells)
             {
-                Match m = BandNumber.Match(bandText ?? "");
+                Match m = BandNumber().Match(bandText ?? "");
                 if (!m.Success) continue;
                 string band = m.Groups[1].Value;
                 if (earfcn is not null && pci is not null)
@@ -107,16 +105,13 @@ namespace WwanProbe.Presentation
             // Only displayed bands determine the maximum; zero keeps the existing default.
             int maxCount = 1;
             foreach (int band in rat.LteBands) maxCount = Math.Max(maxCount, counts.GetValueOrDefault(Invariant($"{band}")));
-            List<FrameLine> segments = new List<FrameLine> { new FrameLine(" LTE bands: ", ConsoleColor.DarkGray) };
+            List<FrameLine> segments = [new FrameLine(" LTE bands: ", ConsoleColor.DarkGray)];
             foreach (int band in rat.LteBands)
             {
                 if (segments.Count > 1) segments.Add(new FrameLine(" ", ConsoleColor.DarkGray));
                 int count = counts.GetValueOrDefault(Invariant($"{band}"));
                 byte? grayLevel = null;
-                if (count > 0)
-                {
-                    grayLevel = maxCount == 1 ? (byte)255 : (byte)Math.Round(144 + 111.0 * (count - 1) / (maxCount - 1));
-                }
+                if (count > 0) grayLevel = maxCount == 1 ? (byte)255 : (byte)Math.Round(144 + (111.0 * (count - 1) / (maxCount - 1)));
                 segments.Add(new FrameLine(Invariant($"B{band}"), ConsoleColor.DarkGray, grayLevel));
             }
             if (rat.NrBands.Count > 0)
@@ -151,8 +146,8 @@ namespace WwanProbe.Presentation
             ModemSummary summary = session.Summary;
             LteSnapshot? snapshot = session.Snapshot;
 
-            List<FrameLine> lines = new List<FrameLine>();
-            string rule = new string('=', Math.Max(0, width));
+            List<FrameLine> lines = [];
+            string rule = new('=', Math.Max(0, width));
 
             // Title bar
             string status = view.Done ? "DONE" : view.Paused ? "PAUSED" : view.Fetching ? "UPDATING" : "RUNNING";
@@ -209,19 +204,13 @@ namespace WwanProbe.Presentation
 
             // Network
             lines.Add(new FrameLine(SectionRule("Network", width), ConsoleColor.DarkCyan));
-            if (snapshot is null)
-            {
-                lines.Add(new FrameLine(" Waiting for first sample...", ConsoleColor.DarkGray));
-            }
-            else
-            {
-                AddNetwork(lines, session, snapshot, view, width);
-            }
+            if (snapshot is null) lines.Add(new FrameLine(" Waiting for first sample...", ConsoleColor.DarkGray));
+            else AddNetwork(lines, session, snapshot, view, width);
 
             // Footer is returned separately so it can be pinned to the bottom row.
             string csvStr = !string.IsNullOrEmpty(config.CsvPath) ? $"  CSV: {config.CsvPath}" : "";
             string satelliteKey = nmeaEnabled ? "[s] Satellites  " : "";
-            FrameLine footer = new FrameLine(
+            FrameLine footer = new(
                 Invariant($" [q] Quit  [p] Pause  [r] Refresh  [R] Reset  [h] Handovers  {satelliteKey}[1-6] Chart  [g] All charts  [Up/Down] Chart rows   Interval: {config.Interval}s{csvStr}"),
                 ConsoleColor.Black);
             return new Frame(lines, footer);
@@ -280,5 +269,8 @@ namespace WwanProbe.Presentation
 
             if (!string.IsNullOrEmpty(snapshot.Error)) lines.Add(new FrameLine($" Error: {snapshot.Error}", ConsoleColor.Red));
         }
+
+        [GeneratedRegex(@"^B(\d+)(?:/|$)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+        private static partial Regex BandNumber();
     }
 }

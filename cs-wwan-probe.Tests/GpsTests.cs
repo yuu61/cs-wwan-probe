@@ -9,26 +9,29 @@ namespace WwanProbe.Tests
     {
         private static readonly DateTimeOffset Now = DateTimeOffset.Parse("2026-09-24T12:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
 
-        private static GpsCoordinate Coordinate() => new GpsCoordinate
+        private static GpsCoordinate Coordinate()
         {
-            PositionSource = "Satellite",
-            IsRemoteSource = false,
-            Timestamp = Now,
-            PositionSourceTimestamp = null,
-            Latitude = 35.123456,
-            Longitude = 139.123456,
-            Altitude = 0,
-            AltitudeReferenceSystem = "Ellipsoid",
-            Accuracy = 4.5,
-            AltitudeAccuracy = 8,
-            Speed = 0,
-            Heading = 0,
-            Hdop = 1.2,
-            Pdop = 1.9,
-            Vdop = 1.5,
-        };
+            return new GpsCoordinate
+            {
+                PositionSource = "Satellite",
+                IsRemoteSource = false,
+                Timestamp = Now,
+                PositionSourceTimestamp = null,
+                Latitude = 35.123456,
+                Longitude = 139.123456,
+                Altitude = 0,
+                AltitudeReferenceSystem = "Ellipsoid",
+                Accuracy = 4.5,
+                AltitudeAccuracy = 8,
+                Speed = 0,
+                Heading = 0,
+                Hdop = 1.2,
+                Pdop = 1.9,
+                Vdop = 1.5,
+            };
+        }
 
-        public static GpsObservation Fix() => GpsObservation.FromReading(new GpsReading("Ready", Coordinate(), null), Now);
+        internal static GpsObservation Fix() => GpsObservation.FromReading(new GpsReading("Ready", Coordinate(), null), Now);
 
         [Fact]
         public void SourceFreshnessPermissionNumericValidityAndZeroMissing()
@@ -74,7 +77,8 @@ namespace WwanProbe.Tests
             Assert.True(zero.Status == "Fix" && zero.Latitude == 0 && zero.Longitude == 0, "Zero coordinates were treated as missing.");
             Assert.True(zero.SpeedMps is null && zero.HeadingDeg is null && zero.AccuracyM is null && zero.AltitudeM is null &&
                 zero.Hdop is null && zero.Pdop is null && zero.Vdop is null, "Unavailable numeric values became zero.");
-            GpsObservation failed = new GpsSource(null, "access denied").Observe();
+            using GpsSource notStarted = new(null, "access denied");
+            GpsObservation failed = notStarted.Observe();
             Assert.True(failed.Status == "Unavailable" && failed.Error == "access denied", "Startup failure was not exposed.");
         }
 
@@ -82,12 +86,12 @@ namespace WwanProbe.Tests
         [Fact]
         public void FailureIsolationBackgroundSamplerFrameAndCsv()
         {
-            FakeModem modem = new FakeModem();
-            FakeTraffic traffic = new FakeTraffic();
-            GpsSource receiver = new GpsSource(null, "GPS unavailable");
+            FakeModem modem = new();
+            FakeTraffic traffic = new();
+            using GpsSource receiver = new(null, "GPS unavailable");
             LteSnapshot snapshot = LteSnapshot.Take(modem, null, traffic, receiver, null);
             Assert.True(snapshot.Error is null && snapshot.Gps!.Error == "GPS unavailable", "GPS failure invalidated LTE.");
-            MonitorSampler sampler = new MonitorSampler(() => LteSnapshot.Take(modem, null, traffic, receiver, null));
+            MonitorSampler sampler = new(() => LteSnapshot.Take(modem, null, traffic, receiver, null));
             sampler.Start();
             Assert.True(SpinWait.SpinUntil(() => sampler.IsCompleted, 10000));
             LteSnapshot background = sampler.Receive();
@@ -96,13 +100,13 @@ namespace WwanProbe.Tests
             MonitorSession session = Fixtures.Session();
             session.Snapshot = snapshot;
             session.Iteration = 1;
-            MonitorView view = new MonitorView { Unicode = false };
-            Assert.Contains("GPS: Unavailable (GPS unavailable)", Fixtures.Text(MonitorFrame.Build(session, view, 100)));
+            MonitorView view = new() { Unicode = false };
+            Assert.Contains("GPS: Unavailable (GPS unavailable)", Fixtures.Text(MonitorFrame.Build(session, view, 100)), StringComparison.Ordinal);
             snapshot.Gps = Fix();
             string text = Fixtures.Text(MonitorFrame.Build(session, view, 100));
-            Assert.Contains("Lat: 35.123456   Lon: 139.123456", text);
-            Assert.Contains("Source: Satellite", text);
-            Assert.Contains("HDOP: 1.2   PDOP: 1.9   VDOP: 1.5", text);
+            Assert.Contains("Lat: 35.123456   Lon: 139.123456", text, StringComparison.Ordinal);
+            Assert.Contains("Source: Satellite", text, StringComparison.Ordinal);
+            Assert.Contains("HDOP: 1.2   PDOP: 1.9   VDOP: 1.5", text, StringComparison.Ordinal);
 
             string csvPath = Fixtures.TempFile();
             try
@@ -113,11 +117,11 @@ namespace WwanProbe.Tests
                 SnapshotLog.Append(csvPath, snapshot);
                 List<Dictionary<string, string>> rows = Fixtures.ReadCsv(csvPath);
                 Assert.True(rows[0]["GPS_Status"] == "Fix" && rows[0]["GPS_Latitude"] == "35.123456" && rows[0]["GPS_Speed_mps"] == "0", "GPS CSV fix or units were lost.");
-                Assert.True(rows[1]["GPS_Status"] == "NoFix" && rows[1]["GPS_Latitude"] == "" && rows[1]["GPS_Timestamp_UTC"] == "", "CSV retained stale coordinates.");
+                Assert.True(rows[1]["GPS_Status"] == "NoFix" && string.IsNullOrEmpty(rows[1]["GPS_Latitude"]) && string.IsNullOrEmpty(rows[1]["GPS_Timestamp_UTC"]), "CSV retained stale coordinates.");
             }
             finally { File.Delete(csvPath); }
             snapshot.Gps = null;
-            Assert.DoesNotContain("GPS / GNSS", Fixtures.Text(MonitorFrame.Build(session, view, 100)));
+            Assert.DoesNotContain("GPS / GNSS", Fixtures.Text(MonitorFrame.Build(session, view, 100)), StringComparison.Ordinal);
         }
     }
 }

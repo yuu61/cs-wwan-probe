@@ -6,10 +6,10 @@ namespace WwanProbe.Domain
     // band 71 and has no band 53, so band 53 (60140-) and bands 72+ (68936-) show as "B?/<EARFCN>". Each entry is
     // the first DL EARFCN of the band; a band ends where the next entry starts, so unassigned gaps are
     // attributed to the band below them (harmless for display). Name = common frequency label, "T" = TDD.
-    public static class LteBand
+    internal static class LteBand
     {
         private static readonly (long FirstEarfcn, int? Band, string? Name)[] Table =
-        {
+        [
             (0, 1, "2100"), (600, 2, "1900"), (1200, 3, "1800"), (1950, 4, "AWS"), (2400, 5, "850"),
             (2650, 6, "800"), (2750, 7, "2600"), (3450, 8, "900"), (3800, 9, "1800"), (4150, 10, "AWS"),
             (4750, 11, "1500"), (5010, 12, "700"), (5180, 13, "700"), (5280, 14, "700"), (5380, null, null),
@@ -25,7 +25,7 @@ namespace WwanProbe.Domain
             (60140, null, null),
             (65536, 65, "2100"), (66436, 66, "AWS"), (67336, 67, "700"), (67536, 68, "700"),
             (67836, 69, "2600"), (68336, 70, "AWS"), (68586, 71, "600"), (68936, null, null),
-        };
+        ];
 
         // A missing EARFCN (WinRT ChannelNumber null) is not read as 0 = band 1.
         public static string FromEarfcn(long? earfcn)
@@ -37,8 +37,9 @@ namespace WwanProbe.Domain
                 if (value < e.FirstEarfcn) break;
                 entry = e;
             }
-            if (entry is null || entry.Value.Band is null) return FormattableString.Invariant($"B?/{value}");
-            return FormattableString.Invariant($"B{entry.Value.Band}/{entry.Value.Name}");
+            return entry is null || entry.Value.Band is null
+                ? FormattableString.Invariant($"B?/{value}")
+                : FormattableString.Invariant($"B{entry.Value.Band}/{entry.Value.Name}");
         }
     }
 }

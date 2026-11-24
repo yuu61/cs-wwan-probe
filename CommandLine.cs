@@ -6,12 +6,12 @@ namespace WwanProbe
     // Options as "-Name value" or "-Name:value" (PowerShell-style parameter binding): names are
     // case-insensitive and may be shortened to an unambiguous prefix, Interval / Count / CsvPath / AtPort
     // also bind by position, and an unknown or misspelled option is an error instead of being ignored.
-    public sealed class CommandLine
+    internal sealed partial class CommandLine
     {
         private sealed record Parameter(string Name, bool IsSwitch, params string[] Aliases);
 
         private static readonly Parameter[] Parameters =
-        {
+        [
             new Parameter("Interval", false),
             new Parameter("Count", false),
             new Parameter("CsvPath", false),
@@ -19,10 +19,9 @@ namespace WwanProbe
             new Parameter("Gps", true),
             new Parameter("Nmea", true, "Nema"),
             new Parameter("Help", true, "?", "h"),
-        };
+        ];
 
-        private static readonly string[] Positional = { "Interval", "Count", "CsvPath", "AtPort" };
-        private static readonly Regex AtPortPattern = new Regex(@"^(COM\d+)?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        private static readonly string[] Positional = ["Interval", "Count", "CsvPath", "AtPort"];
 
         public const string Usage =
             "Usage: cs-wwan-probe [-Interval <seconds>] [-Count <samples>] [-CsvPath <file>] [-AtPort COM<n>] [-Gps] [-Nmea]\n" +
@@ -44,8 +43,8 @@ namespace WwanProbe
         // Parsed options, or null with error set.
         public static CommandLine? Parse(IReadOnlyList<string> args, out string? error)
         {
-            CommandLine options = new CommandLine();
-            HashSet<string> bound = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            CommandLine options = new();
+            HashSet<string> bound = new(StringComparer.OrdinalIgnoreCase);
             int position = 0;
             error = null;
             for (int i = 0; i < args.Count; i++)
@@ -61,16 +60,16 @@ namespace WwanProbe
                         return null;
                     }
                     if (!options.Bind(Positional[position], arg, out error)) return null;
-                    bound.Add(Positional[position]);
+                    _ = bound.Add(Positional[position]);
                     continue;
                 }
                 string name = arg.TrimStart('-', '/');
                 string? value = null;
-                int colon = name.IndexOf(':');
+                int colon = name.IndexOf(':', StringComparison.Ordinal);
                 if (colon >= 0)
                 {
-                    value = name.Substring(colon + 1);
-                    name = name.Substring(0, colon);
+                    value = name[(colon + 1)..];
+                    name = name[..colon];
                 }
                 Parameter? parameter = Resolve(name, out error);
                 if (parameter is null) return null;
@@ -105,8 +104,8 @@ namespace WwanProbe
             error = null;
             Parameter? exact = Parameters.FirstOrDefault(p => Names(p).Any(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase)));
             if (exact is not null) return exact;
-            List<Parameter> matches = name.Length == 0 ? new List<Parameter>()
-                : Parameters.Where(p => Names(p).Any(n => n.StartsWith(name, StringComparison.OrdinalIgnoreCase))).ToList();
+            List<Parameter> matches = name.Length == 0 ? []
+                : [.. Parameters.Where(p => Names(p).Any(n => n.StartsWith(name, StringComparison.OrdinalIgnoreCase)))];
             if (matches.Count == 1) return matches[0];
             error = matches.Count == 0
                 ? $"A parameter cannot be found that matches parameter name '{name}'."
@@ -140,6 +139,9 @@ namespace WwanProbe
                 case "Gps": Gps = on; break;
                 case "Nmea": Nmea = on; break;
                 case "Help": Help = on; break;
+                default:
+                    error = $"A parameter cannot be found that matches parameter name '{name}'.";
+                    return false;
             }
             return true;
         }
@@ -161,16 +163,17 @@ namespace WwanProbe
                     CsvPath = value;
                     return true;
                 case "AtPort":
-                    if (!AtPortPattern.IsMatch(value))
+                    if (!AtPortPattern().IsMatch(value))
                     {
                         error = $"Cannot validate argument on parameter 'AtPort'. The argument \"{value}\" does not match the \"^(COM\\d+)?$\" pattern.";
                         return false;
                     }
                     AtPort = value;
                     return true;
+                default:
+                    error = $"A parameter cannot be found that matches parameter name '{name}'.";
+                    return false;
             }
-            error = $"A parameter cannot be found that matches parameter name '{name}'.";
-            return false;
         }
 
         private static bool Integer(string name, string value, int min, int max, out int result, out string? error)
@@ -189,5 +192,8 @@ namespace WwanProbe
             }
             return true;
         }
+
+        [GeneratedRegex(@"^(COM\d+)?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+        private static partial Regex AtPortPattern();
     }
 }

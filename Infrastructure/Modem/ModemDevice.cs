@@ -5,27 +5,27 @@ using WwanProbe.Domain;
 
 namespace WwanProbe.Infrastructure.Modem
 {
-    public sealed record ModemDeviceInfo(string Model, string Manufacturer, string Firmware, string Imei,
+    internal sealed record ModemDeviceInfo(string Model, string Manufacturer, string Firmware, string Imei,
         string SimIccId, string SimSpn, string RadioState, string DataClass);
 
-    public sealed record ModemNetworkInfo(string ProviderName, string ProviderId, string DataClass, string Apn);
+    internal sealed record ModemNetworkInfo(string ProviderName, string ProviderId, string DataClass, string Apn);
 
     // One WinRT MobileBroadbandCellLte as raw values: RSRP / RSRQ are dBm / dB per the MBIM spec,
     // or 3GPP indices on the L860-GL (normalized by SignalConversion).
-    public sealed record LteCellInfo(long? CellId, string? ProviderId, double? Rsrp, double? Rsrq,
+    internal sealed record LteCellInfo(long? CellId, string? ProviderId, double? Rsrp, double? Rsrq,
         long? Channel, long? Pci, long? Tac, int? Ta);
 
-    public sealed record CellsInfo
+    internal sealed record CellsInfo
     {
-        public IReadOnlyList<LteCellInfo> ServingLte { get; init; } = Array.Empty<LteCellInfo>();
-        public IReadOnlyList<LteCellInfo> NeighborLte { get; init; } = Array.Empty<LteCellInfo>();
-        public IReadOnlyList<UmtsCell> ServingUmts { get; init; } = Array.Empty<UmtsCell>();
+        public IReadOnlyList<LteCellInfo> ServingLte { get; init; } = [];
+        public IReadOnlyList<LteCellInfo> NeighborLte { get; init; } = [];
+        public IReadOnlyList<UmtsCell> ServingUmts { get; init; } = [];
         // WinRT GSM / UMTS / TD-SCDMA / CDMA serving cells.
         public int LegacyServingCount { get; init; }
     }
 
     // The modem as the monitor sees it (WinRtModem on hardware, fakes in tests).
-    public interface IModemDevice : IAtSender
+    internal interface IModemDevice : IAtSender
     {
         ModemDeviceInfo GetDeviceInfo();
         ModemNetworkInfo GetNetwork();
@@ -33,7 +33,7 @@ namespace WwanProbe.Infrastructure.Modem
     }
 
     // Mobile broadband modem access via WinRT.
-    public sealed class WinRtModem : IModemDevice
+    internal sealed class WinRtModem : IModemDevice
     {
         private readonly MobileBroadbandModem modem;
 
@@ -55,8 +55,9 @@ namespace WwanProbe.Infrastructure.Modem
         public ModemNetworkInfo GetNetwork()
         {
             MobileBroadbandNetwork? n = modem.CurrentNetwork;
-            if (n is null) return new ModemNetworkInfo("", "", "", "");
-            return new ModemNetworkInfo(n.RegisteredProviderName ?? "", n.RegisteredProviderId ?? "",
+            return n is null
+                ? new ModemNetworkInfo("", "", "", "")
+                : new ModemNetworkInfo(n.RegisteredProviderName ?? "", n.RegisteredProviderId ?? "",
                 n.RegisteredDataClass.ToString(), n.AccessPointName ?? "");
         }
 
@@ -69,17 +70,19 @@ namespace WwanProbe.Infrastructure.Modem
         {
             MobileBroadbandNetwork network = modem.CurrentNetwork ?? throw new InvalidOperationException("The modem reports no current network.");
             MobileBroadbandCellsInfo info = TaskWait.FirstResult(() => network.GetCellsInfoAsync().AsTask(), 10000, 2000);
-            static LteCellInfo Lte(MobileBroadbandCellLte c) => new LteCellInfo(c.CellId, c.ProviderId,
-                c.ReferenceSignalReceivedPowerInDBm, c.ReferenceSignalReceivedQualityInDBm,
-                c.ChannelNumber, c.PhysicalCellId, c.TrackingAreaCode, c.TimingAdvanceInBitPeriods);
+            static LteCellInfo Lte(MobileBroadbandCellLte c)
+            {
+                return new LteCellInfo(c.CellId, c.ProviderId,
+                    c.ReferenceSignalReceivedPowerInDBm, c.ReferenceSignalReceivedQualityInDBm,
+                    c.ChannelNumber, c.PhysicalCellId, c.TrackingAreaCode, c.TimingAdvanceInBitPeriods);
+            }
             int legacy = (info.ServingCellsGsm?.Count ?? 0) + (info.ServingCellsUmts?.Count ?? 0) +
                 (info.ServingCellsTdscdma?.Count ?? 0) + (info.ServingCellsCdma?.Count ?? 0);
             return new CellsInfo
             {
-                ServingLte = (info.ServingCellsLte ?? Array.Empty<MobileBroadbandCellLte>()).Where(c => c is not null).Select(Lte).ToList(),
-                NeighborLte = (info.NeighboringCellsLte ?? Array.Empty<MobileBroadbandCellLte>()).Where(c => c is not null).Select(Lte).ToList(),
-                ServingUmts = (info.ServingCellsUmts ?? Array.Empty<MobileBroadbandCellUmts>()).Where(c => c is not null)
-                    .Select(c => new UmtsCell(c.CellId, c.ChannelNumber, c.ReceivedSignalCodePowerInDBm)).ToList(),
+                ServingLte = [.. (info.ServingCellsLte ?? []).Where(c => c is not null).Select(Lte)],
+                NeighborLte = [.. (info.NeighboringCellsLte ?? []).Where(c => c is not null).Select(Lte)],
+                ServingUmts = [.. (info.ServingCellsUmts ?? []).Where(c => c is not null).Select(c => new UmtsCell(c.CellId, c.ChannelNumber, c.ReceivedSignalCodePowerInDBm))],
                 LegacyServingCount = legacy,
             };
         }
@@ -90,7 +93,7 @@ namespace WwanProbe.Infrastructure.Modem
 
             MobileBroadbandDeviceService service = modem.GetDeviceService(channel.ServiceId)
                 ?? throw new InvalidOperationException($"{channel.Name} device service not available");
-            Dictionary<string, string?> responses = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, string?> responses = new(StringComparer.OrdinalIgnoreCase);
             foreach (string cmd in commands) responses[cmd] = null;
             MobileBroadbandDeviceServiceCommandSession session = service.OpenCommandSession();
             try
@@ -113,7 +116,7 @@ namespace WwanProbe.Infrastructure.Modem
                     if (result.StatusCode == 0)
                     {
                         IBuffer? buffer = result.ResponseData;
-                        text = MbimAtFraming.FromResponse(channel.Framing, buffer is null ? Array.Empty<byte>() : buffer.ToArray());
+                        text = MbimAtFraming.FromResponse(channel.Framing, buffer is null ? [] : buffer.ToArray());
                     }
                     responses[cmd] = text;
                 }
