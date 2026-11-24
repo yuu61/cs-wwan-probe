@@ -26,7 +26,7 @@ MBIM の仕様 ([MB base stations information query support](https://learn.micro
 (詳細は [neighbor-cells.md](neighbor-cells.md) の 3.)。
 
 以前はインデックス値しか受け付けず、仕様どおり dBm を返すモデムではサービングセルが表示されませんでした。
-現在は `ConvertFrom-WinRtRsrp` / `ConvertFrom-WinRtRsrq` (`src/infrastructure/modem/SignalConversion.ps1`) で両方を受け付けます。
+現在は `SignalConversion.FromWinRtRsrp` / `FromWinRtRsrq` (`Infrastructure/Modem/SignalConversion.cs`) で両方を受け付けます。
 範囲が重ならないので区別できます。範囲外の値や `0xFFFFFFFF` は「値なし」として扱います。
 
 近隣セルは、AT で取れなかった場合に WinRT の `NeighboringCellsLte` を使います
@@ -34,7 +34,7 @@ MBIM の仕様 ([MB base stations information query support](https://learn.micro
 
 ## AT コマンドの経路
 
-起動時に、次の順で `AT` を送り、`OK` が返った最初の経路を使います (`Find-ModemAtChannel`, `src/infrastructure/modem/Modem.ps1`)。
+起動時に、次の順で `AT` を送り、`OK` が返った最初の経路を使います (`AtChannelDetector.Find`, `Infrastructure/Modem/ModemAt.cs`)。
 
 | 経路 | MBIM サービス UUID | CID | MBIM コマンド種別 | 要求 / 応答の形式 | 想定モデム |
 | --- | --- | --- | --- | --- | --- |
@@ -63,14 +63,14 @@ MBIM の仕様 ([MB base stations information query support](https://learn.micro
 - 経路とコマンドセットの判定は**起動時に 1 回だけ**です。起動時にモデムが応答しなかった場合は、再起動するまで AT の値は取れません
   (Intel AT Tunnel の場合を除く。下記)。
 - Intel AT Tunnel だけは、セッションが開けたのに `AT` に `OK` が返らなかった (応答が落ちた・空だった) 場合も、
-  ほかの経路で `OK` が返らなければこの経路を使います (`Find-ModemAtChannel`)。このときはプローブを送らずに Intel のコマンドセットを使います。
+  ほかの経路で `OK` が返らなければこの経路を使います (`AtChannelDetector.Find`)。このときはプローブを送らずに Intel のコマンドセットを使います。
   プロファイル導入前と同じく、起動直後に応答が落ちても、以降の毎回の取得で値が取れるようにするためです。
 - AT の経路がないモデムでは、各 MBIM サービスを 1.5 秒のタイムアウト (と 1 回の再送) で順に試すため、起動に数秒かかることがあります。
   画面には `AT: unavailable (no AT channel (4 MBIM services tried))` と表示し、各サービスの失敗理由は `Summary.At.Tried` に残します。
 
 ## AT コマンドセット (プロファイル)
 
-経路が見つかったら、次の順でプローブを送り、`OK` が返った最初のプロファイルを使います (`src/infrastructure/modem/AtProfile.ps1`)。
+経路が見つかったら、次の順でプローブを送り、`OK` が返った最初のプロファイルを使います (`Infrastructure/Modem/AtProfile.cs`)。
 同じ Fibocom の経路でも、Intel 系 (L850 / L860) と MediaTek 系 (FM350) ではコマンドが異なるため、モデル名ではなく応答で判定します。
 
 | プロファイル | プローブ | 毎回の取得 | 起動時 (RAT / バンド) | 近隣セル・2G/3G の出典 | 状態 |
@@ -87,12 +87,12 @@ MBIM の仕様 ([MB base stations information query support](https://learn.micro
 ### Quectel
 
 出典: [Quectel RG50xQ&RM5xxQ Series AT Commands Manual V1.2](https://quectel.com/content/uploads/2024/05/Quectel_RG50xQRM5xxQ_Series_AT_Commands_Manual_V1.2.pdf)
-(5.12 `QSINR`、5.20 `QENG`、5.21 `QCAINFO`、5.25 `QNWPREFCFG`、12.5 `QTEMP`)。パーサーは `src/infrastructure/modem/QuectelStatus.ps1`。
+(5.12 `QSINR`、5.20 `QENG`、5.21 `QCAINFO`、5.25 `QNWPREFCFG`、12.5 `QTEMP`)。パーサーは `Infrastructure/Modem/QuectelStatus.cs`。
 
 | 値 | 取得元 | 解釈 |
 | --- | --- | --- |
 | 近隣セル | `QENG="neighbourcell"` | LTE モードの `"neighbourcell intra"/"inter"` は `<earfcn>,<PCID>,<RSRQ>,<RSRP>` の順、WCDMA モードの `"neighbourcell","LTE"` は `<RSRP>,<RSRQ>` の順 (逆なので注意)。RSRP / RSRQ は dBm / dB。`-` は無効 |
-| 2G/3G | `QENG` の `"WCDMA"` / `"GSM"` のサービングセル・近隣セル | `Get-DowngradeFinding` に渡す |
+| 2G/3G | `QENG` の `"WCDMA"` / `"GSM"` のサービングセル・近隣セル | `Downgrade.Evaluate` に渡す |
 | SINR | `QCAINFO` の PCC `<RSSNR>` (dB、-10〜30)。なければ `QSINR` の PRX (dB、LTE のとき) | `QENG` の `<SINR>` は使わない: RM5xx のマニュアルの換算式は `Y = 1/5 × X × 10 - 20` だが、EC2x 系は 1/5 dB 単位 (`Y = X/5 - 20`) とされていて食い違い、機種を特定できないため (EC2x 系の定義は検索結果の要約で確認しただけで、マニュアル本文は未確認) |
 | CA | `QCAINFO` (帯域幅はリソースブロック数 6/15/25/50/75/100 = 1.4〜20 MHz) | PCC と、`<scell_state>` が 0 (deconfigured) 以外の SCC を数える。`QCAINFO` が何も返さないときは `QENG` の LTE サービングセルから「1 セル」とする (`<DL_bandwidth>` は XLEC と同じ 0〜5 のインデックス) |
 | 温度 | `QTEMP` | 全センサーのうち最も高い値 (℃)。RM5xx は 1 行 1 センサー (`"<sensor>","<temp>"`)。EM12 / EG25 系は `<pmic>,<xo>,<pa>` の 1 行とされる (Quectel フォーラムの例 `+QTEMP: 30,28,27` による。マニュアル本文は未確認)。範囲外 (-40〜125 以外) は無視 |
@@ -105,7 +105,7 @@ MBIM の仕様 ([MB base stations information query support](https://learn.micro
 ### Fibocom GT (FM350-GL など MediaTek 系)
 
 出典: [FM350 AT Commands User Manual V2.10](https://www.minipc.de/support_db/support_files/Fibocom_FM350_AT%20Commands%20User%20Manual_V2.10.pdf)
-(11.1.14 `GTACT`、11.1.15 `GTCCINFO`、11.1.16 `GTCAINFO`、18.3 `GTSENRDTEMP`)。パーサーは `src/infrastructure/modem/FibocomStatus.ps1`。
+(11.1.14 `GTACT`、11.1.15 `GTCCINFO`、11.1.16 `GTCAINFO`、18.3 `GTSENRDTEMP`)。パーサーは `Infrastructure/Modem/FibocomStatus.cs`。
 
 | 値 | 取得元 | 解釈 |
 | --- | --- | --- |

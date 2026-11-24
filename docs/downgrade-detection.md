@@ -30,7 +30,7 @@
   - バンド: <100 = UTRA バンド番号、101〜299 = 100 + E-UTRA バンド番号、>300 = GSM (MHz)
 - つまり **3G へのダウングレードは設定上起こり得る**。
 
-## 検知ルール (`src/domain/Downgrade.ps1`)
+## 検知ルール (`Domain/Downgrade.cs`)
 
 毎回の更新で次を評価する。
 WinRT の DataClass は infrastructure で GSM / UMTS / CDMA / LTE / NR に正規化し、domain はその RAT の一覧を評価する。
@@ -46,7 +46,7 @@ WinRT の DataClass は infrastructure で GSM / UMTS / CDMA / LTE / NR に正�
 - ベンダー別のコマンドと RAT 設定の読み方は [modem-support.md](modem-support.md) を参照。
 
 - 一度でも検知したら、回数と最後の時刻・理由をセッション中ずっと表示する
-  (`Add-DowngradeLog`、瞬間的なダウングレードの見落とし防止)。
+  (`DowngradeLog`、瞬間的なダウングレードの見落とし防止)。
   TUI の `R` (統計情報のリセット) でこの履歴も消える。現在のサンプルの Alert / Warning は引き続き表示される。
 - 起動時に RAT 設定 (L860-GL は `AT+XACT?`、Quectel は `AT+QNWPREFCFG="mode_pref"`、Fibocom GT は `AT+GTACT?`) を読み、
   2G/3G が許可されていれば `[2G/3G enabled: downgrade possible]` と常時表示する。

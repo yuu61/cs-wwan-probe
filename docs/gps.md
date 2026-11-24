@@ -1,6 +1,6 @@
 # GPS / GNSS の取得と表示
 
-`pwsh -File .\lte_monitor.ps1 -Gps` で GPS 欄を有効にします。
+`-Gps` オプション (`dotnet run -- -Gps`) で GPS 欄を有効にします。
 通常画面とプレーン出力に、緯度・経度 (十進度)、高度 (m)、水平精度 (m)、速度 (m/s)、方位 (度)、HDOP / PDOP / VDOP、測位時刻 (UTC) を表示します。
 未取得の値は `n/a` です。高度はドライバーの高度基準による値で、海抜とは限りません (`-Nmea` では GGA の海抜高度も表示します)。
 DOP (精度低下率) は Windows の `GeocoordinateSatelliteData` の値で、小さいほど衛星配置が良いことを示します。
@@ -39,7 +39,7 @@ GPS の失敗は LTE 測定やハンドオーバー判定に影響しません�
 ## 衛星一覧 (`-Nmea`)
 
 ```powershell
-.\lte_monitor.ps1 -Nmea
+dotnet run -- -Nmea
 ```
 
 `-Nmea` は `-Gps` を含みます。`-Nema` と書いても同じです。オプション名は大文字・小文字を区別せず、存在しないオプションはエラーになります。
@@ -99,16 +99,16 @@ GSV は 1..N のメッセージが順番どおりそろった周期だけを採�
 
 ### 構成と後始末
 
-- ヘルパー (`src/infrastructure/gnss/NmeaHelper.ps1`) は非表示の `pwsh` で動作します。モニターが管理者なら UAC なしで起動します。
-  子プロセスには呼び出し元と同じ実行ポリシーを渡します。
+- ヘルパーは同じ実行ファイルを `--nmea-helper` 付きで非表示で起動したものです (`Infrastructure/Gnss/NmeaHelper.cs`)。
+  モニターが管理者なら UAC なしで起動します。
 - ヘルパーは高精度の Geolocator を購読して Windows に測位セッションを任せます。最初の GNSS デバイスで NMEA ロギングを有効にし、GSV / GSA だけを解析します。
 - 結果は約1秒ごとに `%TEMP%\wwan-nmea-<GUID>\state.json` を置き換えて書き込み、モニターが読み取ります。GGA / RMC からは上記の測位状態の項目だけを読み、緯度・経度と時刻は書き込みません。
   モニターの読み取りと重なった書き込みは失敗するため、次の周期で再試行します。
 - 通常権限のモニターは昇格したヘルパーを終了できません。終了時は停止ファイルで依頼し、最大5秒待ちます。
   ヘルパーはモニターのプロセス終了 (PID と起動時刻で確認) も約1秒ごとに確認するため、モニターの強制終了後も自分で終了します。
 - ヘルパーは終了時に NMEA ロギングを `NONE` に戻し、一時ディレクトリを削除します。起動や受信に失敗した場合は理由を画面に表示します。
-- NMEA の受信は `Global\WwanProbeGnssNmea` ミューテックスで1つに限ります。`lte_monitor.ps1 -Nmea` と `Test-Gnss.ps1 -Nmea` は同時に実行できず、後から起動した側がエラーになります。
-  どちらも終了時にロギングを `NONE` に戻すため、同時に動くと他方の受信を止めてしまうためです。
+- NMEA の受信は `Global\WwanProbeGnssNmea` ミューテックスで1つに限ります。`-Nmea` のモニターを2つ起動すると、後から起動した側がエラーになります。
+  受信側は終了時にロギングを `NONE` に戻すため、同時に動くと他方の受信を止めてしまうためです。NMEA ロギングを切り替える他のツールも同じミューテックスを取ってください。
 
 ## Geolocator だけでは衛星一覧を取得できない理由
 
@@ -138,7 +138,8 @@ L860-GL のこの Windows 環境では、2026-09-24 に次を確認しました�
 
 ## 管理者権限・NMEA・UAC の実機検証
 
-2026-09-24、L860-GL / Intel GNSS ドライバー 4.19042.7.2 で確認しました。
+2026-09-24、L860-GL / Intel GNSS ドライバー 4.19042.7.2 で、C# へ移植する前の PowerShell 版と診断スクリプトを使って確認しました。
+C# 版は同じ手順 (IOCTL・NMEA ロギング・ミューテックス・状態ファイル) を移植したもので、実機ではまだ確認していません。
 
 | 検証 | 結果 |
 | --- | --- |
@@ -159,49 +160,25 @@ SNRが空欄の衛星も含まれ、全15基の信号を追尾・測位に使用
 QZSS / Galileo / BeiDou のメッセージは今回未確認で、機種の対応や電波の受信状況と区別が必要です。
 衛星測位は別の15秒実行では `NoFix / Cellular` でした。昇格自体が測位成功を保証するものではありません。
 
-### 再現用診断
-
-```powershell
-# 機能情報だけを読む (管理者ターミナル)
-.\diagnostics\Test-Gnss.ps1
-
-# 30秒間NMEAを受信。通常権限ならUACで診断用子プロセスを昇格
-.\diagnostics\Test-Gnss.ps1 -Elevate -Nmea -Seconds 30 | Format-List
-```
-
-`-Nmea` を付けると、高精度の Geolocator を購読し、NMEAロギングを一時的に有効にします。
-ネイティブな測位セッションは追加せず、Windowsが測位と補助情報を管理します。
-位置情報サービスの停止、デバイス設定やアクセス権の変更は行いません。
-診断結果には受信種別とチェックサム検証済みの最新GSV/GSAを含めます。緯度・経度の生データは出力しません。
-GSV/GSAは最後に届いた各メッセージを保持する診断用の情報で、同一時刻の衛星一覧や現在の使用衛星数に集計したものではありません。
-
-ドライバーにはNMEAロギングの現在値を読むAPIがないため、終了時は既定値の `NONE` に戻します。
-**他のNMEA診断ツールとは同時に実行しないでください。** `lte_monitor.ps1 -Nmea` と同じ名前のミューテックスを取るため、同時には実行できません。
-診断スクリプトはモニター本体の NMEA 実装 (`src/infrastructure/gnss`) を使わず、独自のネイティブ呼び出し (`diagnostics/GnssProbe.cs`) と解析で動作します。
-通常終了・例外時とも復旧を試み、失敗時は `LoggingDisableError` に理由を残します。
-プロセスの強制終了では後処理を保証できません。
-受信待ちは最大3秒ごとにキャンセルしますが、キャンセル完了はドライバーの応答に依存します。
+上表の検証に使った診断スクリプト (`diagnostics/Test-Gnss.ps1`、ネイティブ呼び出しは `diagnostics/GnssProbe.cs`) は、
+PowerShell 版とともに削除しました (git の履歴には残っています)。
 
 ### UACを使う方針
 
-`Start-Process -Verb RunAs` により、通常権限から診断用の子プロセスだけを昇格できます。
-`-Elevate` を明示したときだけ要求し、管理者の場合はそのまま実行します。
-子プロセスは非表示で動作し、結果を元のPowerShellへ返します。UAC拒否時はエラー終了し、再要求しません。
-管理者環境から `RunAs` による子プロセス起動・結果返却は実機確認済みです。
-**非管理者環境でのUAC同意画面の表示・承認・拒否操作は未確認**です。
-
 モニターの `-Gps` だけでは昇格しません。Geolocator による座標取得には管理者権限は不要で、権限が必要なのはネイティブ NMEA 経路です。
-モニターは `-Nmea` を指定したときだけ、同じ `RunAs` の方式で NMEA 受信ヘルパーを昇格します (「衛星一覧 (`-Nmea`)」)。
+モニターは `-Nmea` を指定したときだけ、`ProcessStartInfo.Verb = "runas"` で自分自身を NMEA 受信ヘルパーとして昇格起動します
+(「衛星一覧 (`-Nmea`)」)。管理者の場合は UAC なしで起動し、UAC を拒否した場合は再要求せず、衛星欄に理由を表示します。
 短時間の併用は成功しましたが、Windows仕様上GNSSは排他的な資源として扱われるため、
 この実験の成功だけで全ドライバーでの併用を保証するものではありません。
 
-`-Nmea` の実機確認 (2026-09-24、管理者ターミナル):
+`-Nmea` の実機確認 (2026-09-24、PowerShell 版、管理者ターミナル):
 
 - プレーン出力の `-Nmea -Count 8` で GPS 12基・GLONASS 6基、使用 6基を表示。終了後にヘルパーと一時ディレクトリが残らないこと
-- モニターを強制終了すると、ヘルパーが約0.6秒で終了して一時ディレクトリを削除。その後の `Test-Gnss.ps1 -Nmea` が NMEA を受信できること
-- モニター実行中の `Test-Gnss.ps1 -Nmea`、診断実行中のモニターが、それぞれ排他エラーになり、先行側の受信は継続すること
+- モニターを強制終了すると、ヘルパーが約0.6秒で終了して一時ディレクトリを削除。その後に別の NMEA 受信 (当時の診断スクリプト) が受信できること
+- モニター実行中の診断スクリプト、診断実行中のモニターが、それぞれ排他エラーになり、先行側の受信は継続すること
 
 非管理者ターミナルからの UAC 承認・拒否、TUI 上での `s` の操作は実機では未確認です (キー操作と画面はテストで確認)。
+C# 版のヘルパーは、通常権限で直接起動したときのエラー終了 (GNSS デバイスなし、モニター終了済み) だけを確認しています。
 
 参考:
 
@@ -210,7 +187,7 @@ GSV/GSAは最後に届いた各メッセージを保持する診断用の情報�
 - [Microsoft: IOCTL_GNSS_LISTEN_NMEA](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/gnssdriver/ni-gnssdriver-ioctl_gnss_listen_nmea)
 - [Microsoft: GNSS ドライバーの構成とアクセス経路](https://learn.microsoft.com/en-us/windows-hardware/drivers/gnss/gnss-driver-architecture)
 - [Microsoft: GNSS_SetNMEALogging](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/gnssdriver/ne-gnssdriver-gnss_drivercommand_type)
-- [Microsoft: Start-Process / RunAs](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/start-process)
+- [Microsoft: ProcessStartInfo.Verb](https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.processstartinfo.verb)
 - [Trimble: NMEA GSV](https://receiverhelp.trimble.com/oem-gnss/nmea0183-messages-gsv.html)
 - [Trimble: NMEA GSA](https://receiverhelp.trimble.com/oem-gnss/nmea0183-messages-gsa.html)
 
@@ -225,9 +202,10 @@ GSV/GSAは最後に届いた各メッセージを保持する診断用の情報�
 
 ## 確認状況と出典
 
-2026-09-24: L860-GL / Fibocom GNSS Sensor の認識、WinRT の受信、基地局由来の座標を採用しない動作を実機で確認。
+2026-09-24: L860-GL / Fibocom GNSS Sensor の認識、WinRT の受信、基地局由来の座標を採用しない動作を PowerShell 版で実機確認。
 同日の管理者権限でのNMEA併用検証中に `Fix / Satellite` を実機確認。
 座標の正確さや屋外での長時間安定性は未検証です。座標・欠測・失効・表示・CSV は疑似データでも検証しています。
+C# 版は移植後に実機で確認していません。疑似データのテストと、同じ入力での PowerShell 版との画面・CSV の一致を確認しています。
 
 - [Microsoft: Geolocator](https://learn.microsoft.com/en-us/uwp/api/windows.devices.geolocation.geolocator)
 - [Microsoft: GPS を有効にする高精度指定](https://learn.microsoft.com/en-us/windows/uwp/maps-and-location/guidelines-and-checklist-for-detecting-location)

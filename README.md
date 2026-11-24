@@ -1,8 +1,9 @@
 # wwan-probe
 
-Windows のモバイルブロードバンド (WWAN) モデム向けの LTE 信号監視ツール (TUI) です。
-Windows の PowerShell 7.4 以降で動作します。
+Windows のモバイルブロードバンド (WWAN) モデム向けの LTE 信号監視ツール (TUI) です。C# (.NET 10) で書かれています。
 実機で確認しているのは Fibocom L860-GL だけです。Quectel や Fibocom FM350 などは仕様上の対応です ([`docs/modem-support.md`](docs/modem-support.md) 参照)。
+
+> 実機での確認は、C# へ移植する前の PowerShell 版で行ったものです。C# 版はモデムのない環境で、テストと、同じ入力に対する PowerShell 版との画面・CSV の一致を確認しています (PowerShell 版は git の履歴に残っています)。
 
 ## 機能
 
@@ -18,45 +19,40 @@ Windows の PowerShell 7.4 以降で動作します。
 ## 必須要件
 
 - **OS**: Windows 10 / 11
-- **PowerShell**: バージョン 7.4 以降 (Windows PowerShell 5.1 では動作しません)
+- **.NET**: .NET 10 SDK (ビルド・実行)。`global.json` で 10.0 系に固定しています
 - **対象モデム**: Windows が認識する MBIM モデム。温度・SINR・CA・近隣セルなどは AT コマンドに対応したモデムのみ
   - 実機確認済み: Fibocom L860-GL (Intel XMM 7560)
   - 仕様上の対応 (未確認): Intel XMM 系、Quectel (RM5xx など `AT+QENG` 対応機)、Fibocom FM350-GL など `AT+GTCCINFO` 対応機
   - AT が使えないモデムでも、WinRT で取れるサービングセルの情報・履歴・CSV は表示・記録できます
 
-## セットアップ
-
-PowerShell 7.4+ がインストールされている環境で、初回のみ WinRT プロジェクション (CsWinRT) の DLL をダウンロード・展開する必要があります。
-
-```powershell
-.\setup.ps1
-```
-
-これにより、`.\lib` ディレクトリに実行に必要な DLL (`WinRT.Runtime.dll`, `Microsoft.Windows.SDK.NET.dll`) が配置されます。
+WinRT (`MobileBroadbandModem`、`Geolocator`) はターゲットフレームワーク (`net10.0-windows10.0.26100.0`) から参照するので、追加のセットアップは不要です。
 
 ## 使い方
 
-以下のスクリプトを実行して TUI モニターを起動します。
+リポジトリ直下で実行すると、ビルドして TUI モニターを起動します。
 
 ```powershell
-.\lte_monitor.ps1 [-Interval <秒>] [-Count <回数>] [-CsvPath "log.csv"] [-AtPort COM7] [-Gps] [-Nmea]
+dotnet run -- [-Interval <秒>] [-Count <回数>] [-CsvPath "log.csv"] [-AtPort COM7] [-Gps] [-Nmea]
 ```
 
-オプション名は大文字・小文字を区別しません。存在しないオプション (綴りの誤りを含む) を指定するとエラーで終了します。
+ビルド済みの実行ファイル (`dotnet build -c Release` の場合は `bin\Release\net10.0-windows10.0.26100.0\cs-wwan-probe.exe`) を直接起動しても同じです。
+
+オプション名は大文字・小文字を区別せず、一意に決まる範囲で省略できます (`-Int 5` など)。`-Interval` / `-Count` / `-CsvPath` / `-AtPort` はこの順に位置でも指定でき、`-Name:値` の形も使えます。
+存在しないオプション (綴りの誤りを含む) や範囲外の値を指定するとエラーで終了します (終了コード 1)。`-?` で使い方を表示します。
 
 ### 引数 (オプション)
 
-- `-Interval`: 測定間隔 (秒)。デフォルトは `0` で、バックトゥバックサンプリング (カウンターの関係で約1秒間隔) を行います。
+- `-Interval`: 測定間隔 (秒、0〜86400)。デフォルトは `0` で、バックトゥバックサンプリング (カウンターの関係で約1秒間隔) を行います。
 - `-Count`: 測定回数。デフォルトは `0` で無限ループします。
-- `-CsvPath`: 指定すると、結果を CSV ファイルにログ出力します。
+- `-CsvPath`: 指定すると、結果を CSV ファイルにログ出力します (UTF-8 BOM 付き、1 測定 1 行)。
 - `-AtPort`: AT コマンドを MBIM ではなく指定の COM ポート (例: `COM7`) で送ります。ベンダードライバが AT ポートを公開しているモデム向けです。省略時は MBIM の AT サービスを自動で探します。
 - `-Gps`: Windows の GNSS ドライバー経路で衛星測位を取得します。GPS 以外 (Wi-Fi・基地局・IP 等) の座標は表示・記録しません。Windows の位置情報サービスとデスクトップアプリの位置情報アクセスを有効にしてください。API の制約により特定のモデムは選択できません。省略時は GPS を取得しません。
-- `-Nmea`: `-Gps` に加えて、GNSS ドライバーの NMEA から捕捉衛星の一覧を取得します。`-Nema` とも書けます。ドライバーが管理者権限を要求するため、起動時に UAC で受信用のヘルパープロセスだけを昇格します (管理者ターミナルでは確認なし)。UAC を拒否しても LTE と GPS 欄の監視は続きます。衛星一覧は CSV には記録しません。
+- `-Nmea`: `-Gps` に加えて、GNSS ドライバーの NMEA から捕捉衛星の一覧を取得します。`-Nema` とも書けます。ドライバーが管理者権限を要求するため、起動時に UAC で受信用のヘルパー (同じ実行ファイルを `--nmea-helper` 付きで起動したもの) だけを昇格します (管理者ターミナルでは確認なし)。UAC を拒否しても LTE と GPS 欄の監視は続きます。衛星一覧は CSV には記録しません。
 
 GPS を表示し、LTE 測定と一緒に CSV へ記録する例:
 
 ```powershell
-.\lte_monitor.ps1 -Gps -CsvPath "log.csv"
+dotnet run -- -Gps -CsvPath "log.csv"
 ```
 
 ### TUI での操作
@@ -92,55 +88,48 @@ CA の副セルの追加・削除、信号強度や TAC だけの変化は数え
 取得不能な測定値は画面では `n/a`、CSV では空欄、履歴グラフでは欠測として扱います。通信量の実測ゼロは `0 B/s` と表示し、カウンター取得失敗は画面と CSV の `Error` 列に理由を記録します。
 LTE セルを取得できない回も履歴の位置を残し、取得できた温度などのモデム全体の測定値は保持します。
 
-（標準入出力がリダイレクトされている場合は、プレーンテキストによる逐次出力にフォールバックします）
+標準入出力がリダイレクトされている場合は、プレーンテキストによる逐次出力 (幅 100 桁、ASCII のグラフ) にフォールバックします。
+このときの `Ctrl+C` は実行中の測定の完了後に終了し (GPS・NMEA ヘルパーも停止します)、もう一度押すとすぐに終了します。
 
 ## ディレクトリ構成
 
 ```text
-lte_monitor.ps1      エントリーポイント (TUI / プレーン出力)
-setup.ps1            WinRT プロジェクションの DLL を lib/ に展開 (初回のみ)
-tool.ps1             リント・整形・テスト (開発用)
-src/                 本体 (下記)
-tests/               ハードウェア不要のテスト (*.Tests.ps1) と共通ヘルパー (TestHelpers.ps1)
-diagnostics/         GNSS ドライバーの診断スクリプト (本体とは独立)
-docs/                技術資料
-tools/csharp/        C# ソースの検査専用プロジェクト (実行時には使わない)
-lib/                 setup.ps1 が展開する DLL (Git 管理外)
+Program.cs                 エントリーポイント (TUI / プレーン出力の選択、NMEA ヘルパーの起動口)
+CommandLine.cs             オプションの解析
+Domain/                    ドメインルール (下記)
+Infrastructure/            ハードウェア・OS・CSV との入出力 (下記)
+Application/               ユースケース (下記)
+Presentation/              画面 (下記)
+cs-wwan-probe.Tests/       ハードウェア不要のテスト (xUnit)
+docs/                      技術資料
+cs-wwan-probe.csproj       本体のプロジェクト
+cs-wwan-probe.slnx         本体とテストのソリューション
 ```
 
-本ツールは Domain-Driven Design (DDD) 風のレイヤードアーキテクチャを採用しており、`src/` 以下がそれぞれの責務に分割されています。
-domain は他のレイヤーに依存せず、application が infrastructure の取得結果にドメインルールを適用します。presentation はその結果を表示します。
+本ツールは Domain-Driven Design (DDD) 風のレイヤードアーキテクチャを採用しており、各フォルダーがそれぞれの責務に分かれています。
+Domain は他のレイヤーに依存せず、Application が Infrastructure の取得結果にドメインルールを適用します。Presentation はその結果を表示します。
 
-- **`domain/`** : 信号の評価・統計、ダウングレード判定、セル同一性とハンドオーバー履歴 (`Signal.ps1`, `Downgrade.ps1`, `Handover.ps1` など)
-- **`infrastructure/`** : ハードウェア・OS・CSV との入出力 (`WinRt.ps1`, `PerfCounter.ps1`, `CsvFile.ps1`)
-  - **`modem/`** : モデムの WinRT 情報と AT 経路の検出・送受信 (`Modem.ps1`, `ModemObservation.ps1`)、ベンダー別のコマンドセットと応答パーサー (`AtProfile.ps1`, `AtResponse.ps1`, `IntelStatus.ps1`, `QuectelStatus.ps1`, `FibocomStatus.ps1` など)、WinRT 値の正規化 (`SignalConversion.ps1`)
-  - **`gnss/`** : GPS (`Gps.ps1`)、NMEA の解析と昇格ヘルパー (`Nmea.ps1`, `NmeaReceiver.ps1`, `NmeaHelper.ps1`)、GNSS ドライバー (`GnssDevice.ps1`)。`Add-Type` でコンパイルする `.cs` は、読み込む `.ps1` と同じフォルダーに置きます
-- **`application/`** : 主セル・副セルを明示した snapshot の作成、セッション更新、履歴・CSV の連携と測定の実行管理 (`MonitorSession.ps1`, `Snapshot.ps1`, `MonitorSampler.ps1` など)
-- **`presentation/`** : ユーザーインターフェース。画面の組み立て (`Frame.ps1`) と各セクション (`HistoryChart.ps1`, `HandoverSection.ps1`, `GnssSection.ps1`)、描画とループ (`ConsoleRenderer.ps1`, `TuiMonitor.ps1`, `PlainMonitor.ps1`)、ゲージ (`Gauge.ps1`)
+- **`Domain/`** : EARFCN とバンドの対応 (`Band.cs`)、信号の評価・統計 (`Signal.cs`)、ダウングレード判定 (`Downgrade.cs`)、セル同一性とハンドオーバー履歴 (`Handover.cs`)、正規化したセル・RAT 設定の型 (`Cells.cs`)
+- **`Infrastructure/`** : WinRT の非同期待ち (`WinRt.cs`)、通信量の性能カウンター (PDH、`AdapterTraffic.cs`)、CSV (`CsvFile.cs`)
+  - **`Modem/`** : モデムの WinRT 情報と MBIM / COM ポートでの AT 送受信 (`ModemDevice.cs`, `AtChannel.cs`)、AT の経路とコマンドセットの判定 (`ModemAt.cs`)、ベンダー別のコマンドセットと応答パーサー (`AtProfile.cs`, `AtResponse.cs`, `IntelStatus.cs`, `QuectelStatus.cs`, `FibocomStatus.cs`)、WinRT 値の正規化 (`SignalConversion.cs`)、1 回分の観測の組み立て (`ModemObservation.cs`)
+  - **`Gnss/`** : GPS (`GpsReceiver.cs`, `Gps.cs`)、NMEA の解析 (`Nmea.cs`)、昇格ヘルパーとその状態ファイル (`NmeaReceiver.cs`, `NmeaHelper.cs`)、GNSS ドライバーの IOCTL (`GnssDevice.cs`)
+- **`Application/`** : 主セル・副セルを明示した snapshot の作成とデバイス情報 (`Snapshot.cs`)、CSV の列と行 (`SnapshotLog.cs`)、セッション更新・履歴・2G/3G 記録とバックグラウンド測定 (`MonitorSession.cs`)
+- **`Presentation/`** : 画面の組み立て (`Frame.cs`) と各セクション (`HistoryChart.cs`, `HandoverSection.cs`, `GnssSection.cs`)、ゲージ (`Gauge.cs`)、描画 (`ConsoleRenderer.cs`)、TUI とプレーン出力のループ (`TuiMonitor.cs`)
 
-`src/Load.ps1` が共通のロード構成を管理します。エントリーポイントは全体を、測定 runspace は `-Components Core` で表示以外の共通部分を読み込みます。
-RAT の許可設定は `AllowedRats` (GSM / UMTS / LTE / NR) と表示文言を分け、2G/3G 許可の判定結果を application から画面に渡します。
+RAT の許可設定は `AllowedRats` (GSM / UMTS / LTE / NR) と表示文言を分け、2G/3G 許可の判定結果を Application から画面に渡します。
 
 ## 開発
 
-`tool.ps1` で PowerShell (リポジトリ内のすべての `.ps1`) と C# (`Add-Type` で実行時にコンパイルする `src/`・`diagnostics/` の `.cs`) のリント・整形と、テストを行います。
-
 ```powershell
-.\tool.ps1 lint           # PSScriptAnalyzer と Roslyn Analyzers
-.\tool.ps1 format         # Invoke-Formatter と dotnet format (whitespace / style) で整形
-.\tool.ps1 format -Check  # 整形が必要なファイルの報告のみ (変更しない)
-.\tool.ps1 test           # tests\*.Tests.ps1 を実行 (モデム不要)
+dotnet build cs-wwan-probe.slnx                             # 本体とテストのビルド
+dotnet test cs-wwan-probe.slnx                              # テスト (モデム不要)
+dotnet format cs-wwan-probe.slnx                            # 整形 (.editorconfig に従う)
+dotnet format cs-wwan-probe.slnx --verify-no-changes        # 整形が必要なファイルの報告のみ
 ```
 
-- 必要なもの (`lint` / `format`): PSScriptAnalyzer モジュール、.NET 10 SDK、`.\setup.ps1` で展開した `lib\` の DLL。`test` はどれも不要です
-- `test` は各テストファイルを別の `pwsh` プロセスで並列に実行します (テストは本体の関数をスタブで置き換えるため、ファイル間で共有しません)。1 ファイルだけなら `pwsh -NoProfile -File tests\Domain.Tests.ps1` のように直接実行できます
-- テストファイルは先頭で `tests\TestHelpers.ps1` を読み込みます (`src/Load.ps1` と `Assert-True` / `Assert-Equal`)。スタブはその後に定義します
-- `tests/` では位置指定パラメーター (`PSAvoidUsingPositionalParameters`) と ShouldProcess (`PSUseShouldProcessForStateChangingFunctions`) の指摘を、各テストファイル先頭の `SuppressMessageAttribute` で抑制しています
-- PSScriptAnalyzer によるリント・整形の実行中は `PATH` と `PSModulePath` を `$PSHOME` に絞っています (速度のため)。`$PSHOME` 以外のモジュールのコマンドは、コマンドを調べるルールの対象外になります
-- `global.json` で SDK を 10.0.x (インストール済みの最新の 10.0 系) に固定しています。`tool.ps1` はリポジトリ直下で `dotnet` を実行するので、どのディレクトリから呼んでもこの指定が効きます
-- C# は検査専用のプロジェクト `tools/csharp/WwanProbe.csproj` 経由で検査します。実行時には使いません。検査対象は PowerShell 7.4 (.NET 8) の `Add-Type` に合わせて net8.0 (C# 12)、implicit usings と nullable は無効です
-- Roslyn Analyzers は .NET 10 SDK 同梱のもの (`AnalysisLevel` = `latest-recommended`) を使い、警告もエラーとして扱います。書式やコードスタイルの設定は `.editorconfig` にあります
-- `format` はアナライザーのコード修正 (`dotnet format analyzers`) を適用しません。動作が変わる修正もあるため、`lint` で報告して手で直します
+- テストはモデムの代わりに `IModemDevice` (WinRT と AT の送受信) と `ITrafficCounter` (通信量) の疑似実装を使い、本体の観測・snapshot・履歴・CSV・画面の処理をそのまま通します。AT の応答はマニュアルの例と L860-GL の実機応答をフィクスチャにしています
+- TUI のループは `ITuiTerminal`、描画は `IConsoleSurface` を差し替えてテストします
+- コードスタイルは `.editorconfig` にあります (明示的な型、ブロック形式の名前空間、名前空間の外の using)
 
 ## ドキュメント
 
