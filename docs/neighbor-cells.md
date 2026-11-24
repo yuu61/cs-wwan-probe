@@ -75,7 +75,7 @@ ModemControl Device を無効化すれば COM6 は解放されるはずだが、
 - 近隣セル一覧 (`LTEMrlOffset`) は「返す近隣セルがなければ NULL でよい」とされ、返すことは必須ではない。
 - 仕様上の LTE RSRP は **-140〜-44 (1 dBm 単位)**、RSRQ は -20〜-3。
   このモデムはサービングセルの RSRP に `61` のような **3GPP 36.133 のインデックス値**を返しており、仕様と異なる。
-  WinRT の値は `ConvertFrom-WinRtRsrp` / `ConvertFrom-WinRtRsrq` で変換する。仕様どおりの dBm / dB とこのモデムのインデックス値の
+  WinRT の値は `SignalConversion.FromWinRtRsrp` / `FromWinRtRsrq` で変換する。仕様どおりの dBm / dB とこのモデムのインデックス値の
   両方を受け付ける (範囲が重ならないため区別できる)。
 - CID 11 を device service として直接送る案は、`BASIC_CONNECT_EXTENSIONS` の
   `OpenCommandSession()` が `0x80070015` (ERROR_NOT_READY) で失敗するため不可 (OS が占有していると見られる)。
@@ -88,8 +88,8 @@ ModemControl Device を無効化すれば COM6 は解放されるはずだが、
 - 応答が返らなかった 1 回は、10 秒以内に返らず、約 60 秒後に Windows 側で失敗扱いになった (失敗の理由は記録していない)。
   遅れて返るのではなく、応答がないまま終わる。
 - その間も、新しく送ったクエリは 10〜25 ms で返り、AT も正常だった。タイムアウト直後の取得は 7 回中 7 回成功している。
-- このため `Get-ModemCellsInfo` は、2 秒たっても返らないクエリをもう 1 回送り、2 つのうち先に返った結果を使う
-  (`Wait-TaskResult`)。全体の上限は従来どおり 10 秒。
+- このため `WinRtModem.GetCellsInfo` は、2 秒たっても返らないクエリをもう 1 回送り、2 つのうち先に返った結果を使う
+  (`TaskWait.FirstResult`)。全体の上限は従来どおり 10 秒。
   先に送ったクエリは取り消さない (L860-GL では、残したままでも後続のクエリは妨げられなかった)。
 - 応答に 2 秒以上かかるモデムでも最初の応答を 10 秒まで待つが、その場合は毎回クエリが 1 つ余分に送られる。
   クエリを 1 つずつしか処理しないモデムでは次の取得が遅れる可能性がある。L860-GL 以外では確認していない。
@@ -158,25 +158,24 @@ OK
 
 | ファイル | 内容 |
 | --- | --- |
-| `src/infrastructure/modem/Modem.ps1` | `Find-ModemAtChannel`: 起動時に AT の経路 (Intel AT Tunnel など) を探す。`Invoke-ModemAtCommand`: 1 つのセッションで複数コマンドを順に送り、`@{ コマンド = 応答文字列 }` を返す |
-| `src/infrastructure/modem/IntelCellMeasurement.ps1` | `ConvertFrom-XmciResponse`: `+XMCI:` 行をセルのオブジェクトに変換 |
-| `src/infrastructure/modem/IntelStatus.ps1` | `+MTSM` / `+XCESQ` / `+XLEC` / `+XACT` の応答パーサー |
-| `src/infrastructure/modem/AtResponse.ps1` | 各ベンダーのパーサーが共有する AT 応答の分解 (`Get-AtResponseField` など) と LTE 帯域幅の表 |
-| `src/infrastructure/modem/AtProfile.ps1` | ベンダー別のコマンドセット (Intel は `AT+XMCI=?` の応答で判定) と、応答から近隣セル・温度・RSSNR・CA へのまとめ |
-| `src/infrastructure/modem/ModemObservation.ps1` | `Initialize-ModemAt`: 起動時に経路とコマンドセットを判定。`Get-AtStatus`: 近隣セル・温度・RSSNR・CA を取得。`Get-ModemDeviceSummary`: 有効 LTE バンドを起動時に 1 回取得。`Get-ModemObservation`: WinRT と AT の結果を正規化 |
-| `src/application/Snapshot.ps1` | `Get-LteSnapshot`: 主セル・副セルを確定し、ドメインの信号評価・ダウングレード判定を適用。`Get-ModemSummary`: RAT 設定から 2G/3G 許可の判定結果を作成 |
-| `src/presentation/Frame.ps1` | `LTE bands` 行、`Temp / RSSNR / CA` 行、Neighbors セクションの表示 |
-| `src/presentation/HistoryChart.ps1` | History のグラフ。RSSNR (`SNR`) と温度 (`Temp`) もグラフ表示 |
+| `Infrastructure/Modem/AtChannel.cs` | AT の経路 (MBIM の各ベンダーサービス、COM ポート) と要求・応答の形式。`IAtSender.SendAt`: 1 つのセッションで複数コマンドを順に送り、コマンド → 応答文字列を返す |
+| `Infrastructure/Modem/ModemAt.cs` | `AtChannelDetector.Find`: 起動時に AT の経路 (Intel AT Tunnel など) を探す。`ModemAt.Initialize`: 経路とコマンドセットを判定。`ReadStatus`: 近隣セル・温度・RSSNR・CA を取得。`ReadConfig`: 有効 LTE バンドを起動時に 1 回取得 |
+| `Infrastructure/Modem/ModemDevice.cs` | `WinRtModem`: WinRT のモデム情報・セル情報の取得と、MBIM での AT 送受信 |
+| `Infrastructure/Modem/IntelStatus.cs` | `ParseXmci`: `+XMCI:` 行をセルに変換。`+MTSM` / `+XCESQ` / `+XLEC` / `+XACT` の応答パーサー |
+| `Infrastructure/Modem/AtResponse.cs` | 各ベンダーのパーサーが共有する AT 応答の分解 (`GetField` など) と LTE 帯域幅の表 |
+| `Infrastructure/Modem/AtProfile.cs` | ベンダー別のコマンドセット (Intel は `AT+XMCI=?` の応答で判定) と、応答から近隣セル・温度・RSSNR・CA へのまとめ (`AtStatusParser`) |
+| `Infrastructure/Modem/ModemObservation.cs` | `ModemObservation.Observe`: WinRT と AT の結果を正規化 |
+| `Application/Snapshot.cs` | `LteSnapshot.Take`: 主セル・副セルを確定し、ドメインの信号評価・ダウングレード判定を適用。`ModemSummary.Read`: RAT 設定から 2G/3G 許可の判定結果を作成 |
+| `Presentation/Frame.cs` | `LTE bands` 行、`Temp / RSSNR / CA` 行、Neighbors セクションの表示 |
+| `Presentation/HistoryChart.cs` | History のグラフ。RSSNR (`SNR`) と温度 (`Temp`) もグラフ表示 |
 
-- PowerShell は CsWinRT の `IBuffer` を引数・戻り値として正しく扱えない
-  (`WinRT.IInspectable` から `IBuffer` への変換で失敗する) ため、
-  `SendSetCommandAsync` / `ResponseData` / `ToArray` はリフレクション経由で呼んでいる。
-- 1 コマンドのタイムアウトは 3 秒。タイムアウトしたらそのセッションの残りのコマンドは送らず `$null` にする。
+- AT コマンドは `IBuffer` (`AsBuffer()` / `ToArray()`) で `SendSetCommandAsync` / `SendQueryCommandAsync` に渡し、応答を受け取る。
+- 1 コマンドのタイムアウトは 3 秒。タイムアウトしたらそのセッションの残りのコマンドは送らず null にする。
   プロセスが AT Tunnel を使い始めた直後に応答が 1 回返らないことがあったため、起動時の判定だけはタイムアウト時に 1 回再送する。
   毎回の更新では `AT+MTSM=1`, `AT+XCESQ?`, `AT+XLEC?`, `AT+XMCI=0` の順に送る (XMCI を最後にして、詰まっても他の値は残す)。
 - 取得できなかった値は `n/a`、近隣セルは `(unavailable: <理由>)` と表示し、サービングセルの表示は継続する。
   AT で近隣セルが取れなかったときは WinRT の `NeighboringCellsLte` を使う (L860-GL では常に 0 件なので `unavailable` のまま)。
-- CSV (`-CsvPath`) には温度・RSSNR・CA (セル数・帯域幅・SCell) も出力する (列は `src/application/SnapshotLog.ps1` 参照)。近隣セルは出力していない。
+- CSV (`-CsvPath`) には温度・RSSNR・CA (セル数・帯域幅・SCell) も出力する (列は `Application/SnapshotLog.cs` 参照)。近隣セルは出力していない。
 - History のグラフは RSRP / RSRQ / SNR / RX / TX / Temp。TUI では `1`〜`6` で個別に、`g` で全部をまとめて表示・非表示を切り替える。
   初期状態は RSRP / RSRQ / SNR のみ表示 (画面の高さを節約するため)。取得できなかった値はグラフ上で空白になる。
   RX / TX は対数スケール。上限・下限は表示中の正の値を挟む 10 の累乗で自動調整 (最低 1 桁幅、下限は 100 B/s 以上。計測の分解能は 0.1 KB/s = 102.4 B/s)。0 と下限未満は最下段に描く。
@@ -215,11 +214,12 @@ OK
 
 ## 再確認手順
 
+出力をリダイレクトするとプレーン出力になるので、1 回だけ測定して画面と同じ内容をファイルに残せます。
+
 ```powershell
-. .\src\Load.ps1 -Components Core
-Import-WinRtProjection (Join-Path (Get-Location) 'lib')
-$m = Get-DefaultModem
-@((Get-ModemCellsInfo $m.CurrentNetwork).NeighboringCellsLte).Count  # WinRT (現状 0)
-$ch = Find-ModemAtChannel $m $null  # Intel AT Tunnel
-Invoke-ModemAtCommand $m $ch @('AT+XMCI=0', 'AT+MTSM=1', 'AT+XCESQ?', 'AT+XLEC?', 'AT+XACT?')
+dotnet run -- -Count 1 > sample.txt
 ```
+
+`AT:` 行に経路とコマンドセット (例: `Intel AT Tunnel / Intel XMM (+X commands)`)、`Neighbors` セクションに近隣セル
+(AT で取れなければ `(unavailable: <理由>)`)、`Temp / RSSNR / CA` 行に AT の値が出ます。
+AT の応答そのものは `cs-wwan-probe.Tests/DomainTests.cs` の実機応答のフィクスチャで解析を確認できます。

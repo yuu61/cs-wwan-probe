@@ -2,10 +2,21 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
-    <RootNamespace>cs_wwan_probe</RootNamespace>
+    <!-- The Windows TFM brings the WinRT projection (MobileBroadbandModem, Geolocator). -->
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <RootNamespace>WwanProbe</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The test project lives below this one. -->
+    <Compile Remove="cs-wwan-probe.Tests/**" />
+    <None Remove="cs-wwan-probe.Tests/**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.IO.Ports" Version="10.0.0" />
+  </ItemGroup>
 
 </Project>
