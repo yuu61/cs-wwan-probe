@@ -7,14 +7,14 @@ using WwanProbe.Presentation;
 namespace WwanProbe.Tests
 {
     // Handover history, reset and related frame sections.
-    public class HandoverTests
+    public partial class HandoverTests
     {
         private static void Add(HandoverLog log, LteSnapshot s) => log.Add(s.PrimaryCell, s.Timestamp, !string.IsNullOrEmpty(s.Error));
 
         [Fact]
         public void BaselineIdentityMetadataImmutableEventsReturnsAndRetention()
         {
-            HandoverLog log = new HandoverLog(3);
+            HandoverLog log = new(3);
             LteSnapshot sample = Snapshots.Handover();
             Add(log, sample);
             Assert.Equal(0, log.Count);
@@ -41,7 +41,7 @@ namespace WwanProbe.Tests
         [InlineData("missing-provider")]
         public void GapsResetTheBaseline(string kind)
         {
-            HandoverLog log = new HandoverLog();
+            HandoverLog log = new();
             Add(log, Snapshots.Handover());
             LteSnapshot gap = Snapshots.Handover(200);
             switch (kind)
@@ -51,6 +51,7 @@ namespace WwanProbe.Tests
                 case "invalid": gap.PrimaryCell = gap.PrimaryCell! with { CellId = uint.MaxValue }; break;
                 case "missing-id": gap.PrimaryCell = gap.PrimaryCell! with { CellId = null }; break;
                 case "missing-provider": gap.PrimaryCell = gap.PrimaryCell! with { Provider = "" }; break;
+                default: throw new ArgumentOutOfRangeException(nameof(kind), kind, "unknown gap kind");
             }
             Add(log, gap);
             Add(log, Snapshots.Handover(300));
@@ -64,20 +65,20 @@ namespace WwanProbe.Tests
         public void SnapshotIdentityIsIndependentOfRsrpAndSecondaryCells()
         {
             FakeModem modem = new FakeModem().WithIntelStatus(At.Responses(("AT+XMCI=0", At.Response())));
-            FakeTraffic traffic = new FakeTraffic();
+            FakeTraffic traffic = new();
             LteCellInfo primary = Fixtures.LteCell(100, "44010", 255, 255, 100, pci: 10, tac: 20, ta: 0);
             LteCellInfo secondary = primary with { Rsrp = 50, CellId = 200 };
-            modem.Cells = new CellsInfo { ServingLte = new[] { primary, secondary } };
-            HandoverLog log = new HandoverLog();
+            modem.Cells = new CellsInfo { ServingLte = [primary, secondary] };
+            HandoverLog log = new();
             LteSnapshot snapshot = LteSnapshot.Take(modem, At.Intel, traffic, null, null);
             Assert.True(snapshot.Error is null && snapshot.PrimaryCell!.CellId == 100 && snapshot.PrimaryCell.RsrpDbm is null, "Unmeasured primary identity was lost.");
             Add(log, snapshot);
-            modem.Cells = new CellsInfo { ServingLte = new[] { primary, secondary with { CellId = 300 } } };
+            modem.Cells = new CellsInfo { ServingLte = [primary, secondary with { CellId = 300 }] };
             Add(log, LteSnapshot.Take(modem, At.Intel, traffic, null, null));
-            modem.Cells = new CellsInfo { ServingLte = new[] { primary } };
+            modem.Cells = new CellsInfo { ServingLte = [primary] };
             Add(log, LteSnapshot.Take(modem, At.Intel, traffic, null, null));
             Assert.Equal(0, log.Count);
-            modem.Cells = new CellsInfo { ServingLte = new[] { primary with { CellId = 400 } } };
+            modem.Cells = new CellsInfo { ServingLte = [primary with { CellId = 400 }] };
             Add(log, LteSnapshot.Take(modem, At.Intel, traffic, null, null));
             Assert.Equal(1, log.Count);
         }
@@ -90,16 +91,16 @@ namespace WwanProbe.Tests
             {
                 Cells = new CellsInfo
                 {
-                    ServingLte = new[] { Fixtures.LteCell(500, "44020", -97, -11, 9460, pci: 5, tac: 30, ta: 0) },
-                    NeighborLte = new[] { Fixtures.LteCell(4294967295, "44020", -105, -14, 1500, pci: 77, tac: 30) },
+                    ServingLte = [Fixtures.LteCell(500, "44020", -97, -11, 9460, pci: 5, tac: 30, ta: 0)],
+                    NeighborLte = [Fixtures.LteCell(4294967295, "44020", -105, -14, 1500, pci: 77, tac: 30)],
                 },
             }.WithIntelStatus(At.Responses());
-            FakeTraffic traffic = new FakeTraffic();
+            FakeTraffic traffic = new();
             LteSnapshot snapshot = LteSnapshot.Take(modem, At.Intel, traffic, null, null);
             Assert.True(snapshot.Serving.Count == 1 && snapshot.Serving[0].RsrpDbm == -97 && snapshot.Serving[0].RsrqDb == -11, "Spec dBm serving cell was dropped.");
             Assert.True(snapshot.Serving[0].Band == "B28/700" && snapshot.PrimaryCell!.RsrpDbm == -97, "Spec serving cell identity is wrong.");
             Assert.True(snapshot.Neighbors!.Count == 1 && snapshot.Neighbors[0].RsrpDbm == -105 && snapshot.Neighbors[0].Band == "B3/1800", "WinRT neighbor fallback failed.");
-            modem.WithIntelStatus(At.Responses(("AT+XMCI=0", At.Response())));
+            _ = modem.WithIntelStatus(At.Responses(("AT+XMCI=0", At.Response())));
             Assert.Empty(LteSnapshot.Take(modem, At.Intel, traffic, null, null).Neighbors!);
         }
 
@@ -109,10 +110,10 @@ namespace WwanProbe.Tests
             MonitorSession session = Fixtures.Session();
             for (int i = 0; i <= 12; i++) session.AddSnapshot(Snapshots.Handover(100 + i));
             Assert.True(session.Iteration == 13 && session.HandoverLog.Count == 12, "Sample commit did not update handover history.");
-            MonitorView view = new MonitorView { Unicode = false, LastHeight = 24 };
+            MonitorView view = new() { Unicode = false, LastHeight = 24 };
             string text = Fixtures.Text(MonitorFrame.Build(session, view, 120));
-            Assert.Contains("Handover history (12)", text);
-            Assert.Contains("Switched to CellID:112 B1 PCI:10", text);
+            Assert.Contains("Handover history (12)", text, StringComparison.Ordinal);
+            Assert.Contains("Switched to CellID:112 B1 PCI:10", text, StringComparison.Ordinal);
             Assert.DoesNotMatch(@"CellID:109\b", text);
             Assert.DoesNotMatch("From:|To:|->", text);
 
@@ -120,19 +121,19 @@ namespace WwanProbe.Tests
             Frame frame = MonitorFrame.Build(session, view, 120);
             text = Fixtures.Text(frame);
             Assert.True(view.HandoverVisible);
-            Assert.Contains("#12 2026-09-24 12:34:56 Switched to CellID:112", text);
-            Assert.Contains("B1 PCI:10 PLMN:44010 EARFCN:100 TAC:20 RSRP:-90dBm", text);
+            Assert.Contains("#12 2026-09-24 12:34:56 Switched to CellID:112", text, StringComparison.Ordinal);
+            Assert.Contains("B1 PCI:10 PLMN:44010 EARFCN:100 TAC:20 RSRP:-90dBm", text, StringComparison.Ordinal);
             Assert.DoesNotMatch("From:|To:|->", text);
             Assert.True(frame.Body.Count <= 23, "History page does not fit the terminal.");
             TuiMonitor.ReadInput(view, Keys.From(Keys.Of(ConsoleKey.DownArrow)));
             Assert.True(view.HandoverOffset == 1 && view.ChartRows == 2, "History scrolling changed chart height.");
             view.HandoverOffset = 10000;
-            Assert.Contains("#1 2026-09-24", Fixtures.Text(MonitorFrame.Build(session, view, 120)));
+            Assert.Contains("#1 2026-09-24", Fixtures.Text(MonitorFrame.Build(session, view, 120)), StringComparison.Ordinal);
             TuiMonitor.ReadInput(view, Keys.From(Keys.Of(ConsoleKey.H)));
             Assert.False(view.HandoverVisible);
             view.HandoverVisible = true;
             session.HandoverLog = new HandoverLog();
-            Assert.Contains("no LTE cell changes", Fixtures.Text(MonitorFrame.Build(session, view, 80)));
+            Assert.Contains("no LTE cell changes", Fixtures.Text(MonitorFrame.Build(session, view, 80)), StringComparison.Ordinal);
         }
 
         // Device header for a non-Intel modem: AT line, RAT without a preferred RAT, NR bands, AUTO warning.
@@ -141,7 +142,7 @@ namespace WwanProbe.Tests
         {
             MonitorSession session = Fixtures.Session();
             session.AddSnapshot(Snapshots.Handover());
-            MonitorView view = new MonitorView { Unicode = false, LastHeight = 24 };
+            MonitorView view = new() { Unicode = false, LastHeight = 24 };
             session.Summary = new ModemSummary
             {
                 LegacyAllowed = true,
@@ -149,17 +150,17 @@ namespace WwanProbe.Tests
                 Firmware = "x",
                 RadioState = "On",
                 DataClass = "Lte",
-                At = new ModemAt(AtChannel.Mbim[3], At.Profile(AtProfile.QuectelId), null, Array.Empty<string>()),
-                RatConfig = new RatConfig { Allowed = "3G+4G+5G (AUTO)", UmtsBands = new[] { 1, 8 }, LteBands = new[] { 1, 3 }, NrBands = new[] { 78 } },
+                At = new ModemAt(AtChannel.Mbim[3], At.Profile(AtProfile.QuectelId), null, []),
+                RatConfig = new RatConfig { Allowed = "3G+4G+5G (AUTO)", UmtsBands = [1, 8], LteBands = [1, 3], NrBands = [78] },
             };
             string text = Fixtures.Text(MonitorFrame.Build(session, view, 80));
-            Assert.Contains("AT: Quectel QDU / Quectel (+Q commands)", text);
-            Assert.Contains("RAT: 3G+4G+5G (AUTO)   2G/3G bands: B1 B8   [2G/3G enabled", text);
-            Assert.DoesNotContain("prefer", text);
-            Assert.Contains("LTE bands: B1 B3   NR bands: n78", text);
-            session.Summary = session.Summary with { At = new ModemAt(null, null, "no AT channel (4 MBIM services tried)", Array.Empty<string>()), RatConfig = null };
+            Assert.Contains("AT: Quectel QDU / Quectel (+Q commands)", text, StringComparison.Ordinal);
+            Assert.Contains("RAT: 3G+4G+5G (AUTO)   2G/3G bands: B1 B8   [2G/3G enabled", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("prefer", text, StringComparison.Ordinal);
+            Assert.Contains("LTE bands: B1 B3   NR bands: n78", text, StringComparison.Ordinal);
+            session.Summary = session.Summary with { At = new ModemAt(null, null, "no AT channel (4 MBIM services tried)", []), RatConfig = null };
             Frame frame = MonitorFrame.Build(session, view, 80);
-            Assert.Contains("AT: unavailable (no AT channel (4 MBIM services tried))", Fixtures.Text(frame));
+            Assert.Contains("AT: unavailable (no AT channel (4 MBIM services tried))", Fixtures.Text(frame), StringComparison.Ordinal);
             int headerEnd = frame.Body.FindIndex(l => l.Text.StartsWith("-- Network ", StringComparison.Ordinal));
             Assert.All(frame.Body.Take(headerEnd), l => Assert.True(l.Text.Length <= 80, "Header lines must fit 80 columns."));
         }
@@ -177,12 +178,15 @@ namespace WwanProbe.Tests
                 session.History["Rsrq"].Add(-10);
                 session.History["Rssnr"].Add(10);
                 session.History["TempC"].Add(40);
-                session.History["RxKB"].Add(20 + 6 * i);
+                session.History["RxKB"].Add(20 + (6 * i));
                 session.History["TxKB"].Add(0.2);
             }
-            MonitorView view = new MonitorView { Unicode = false, LastHeight = 24 };
-            string Scales() => string.Join(',', MonitorFrame.Build(session, view, 120).Body
-                .Select(l => Regex.Match(l.Text, @"log scale (\S+\.\.\S+) B/s")).Where(m => m.Success).Select(m => m.Groups[1].Value));
+            MonitorView view = new() { Unicode = false, LastHeight = 24 };
+            string Scales()
+            {
+                return string.Join(',', MonitorFrame.Build(session, view, 120).Body
+                    .Select(l => TrafficScaleLabel().Match(l.Text)).Where(m => m.Success).Select(m => m.Groups[1].Value));
+            }
             view.ChartVisible["4"] = true;
             view.ChartVisible["5"] = true;
             Assert.Equal("100..100k,100..100k", Scales());
@@ -196,7 +200,7 @@ namespace WwanProbe.Tests
             string text = Fixtures.Text(MonitorFrame.Build(session, view, 120));
             Assert.Matches(@" RX +100k \|", text);
             Assert.Matches(@" TX +100k \|", text);
-            Assert.Equal(2, Regex.Matches(text, @"log, 5\.3 levels/decade").Count);
+            Assert.Equal(2, LogScaleDensity().Count(text));
         }
 
         // Reset clears the statistics but keeps progress, the latest sample and the handover baseline.
@@ -207,24 +211,30 @@ namespace WwanProbe.Tests
             foreach (long cellId in new long[] { 100, 200 })
             {
                 LteSnapshot sample = Snapshots.Handover(cellId);
-                sample.Serving = new[] { new ServingCell { RsrpDbm = -90, RsrqDb = -10, Quality = "Good" } };
-                if (cellId == 100) sample.Downgrade = new DowngradeFinding(DowngradeLevel.Alert, new[] { "test downgrade" });
+                sample.Serving = [new ServingCell { RsrpDbm = -90, RsrqDb = -10, Quality = "Good" }];
+                if (cellId == 100) sample.Downgrade = new DowngradeFinding(DowngradeLevel.Alert, ["test downgrade"]);
                 session.AddSnapshot(sample);
             }
-            MonitorView view = new MonitorView { Unicode = false, LastHeight = 24 };
+            MonitorView view = new() { Unicode = false, LastHeight = 24 };
             string text = Fixtures.Text(MonitorFrame.Build(session, view, 120));
-            Assert.True(session.HandoverLog.Count == 1 && session.History["Rsrp"].Count == 2 && text.Contains("seen earlier") && text.Contains("History (primary cell)"),
+            Assert.True(session.HandoverLog.Count == 1 && session.History["Rsrp"].Count == 2 && text.Contains("seen earlier", StringComparison.Ordinal) && text.Contains("History (primary cell)", StringComparison.Ordinal),
                 "Reset test setup failed.");
             session.ResetStatistics();
             Assert.True(session.Iteration == 2 && session.Snapshot!.PrimaryCell!.CellId == 200, "Reset changed progress or the latest sample.");
             Assert.True(session.History.Series.All(s => s.Count == 0) && session.HandoverLog.Entries.Count == 0, "Reset kept history.");
             text = Fixtures.Text(MonitorFrame.Build(session, view, 120));
-            Assert.Contains("Handover history (0)", text);
-            Assert.DoesNotContain("seen earlier", text);
-            Assert.DoesNotContain("History (primary cell)", text);
+            Assert.Contains("Handover history (0)", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("seen earlier", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("History (primary cell)", text, StringComparison.Ordinal);
             session.AddSnapshot(Snapshots.Handover(300));
             HandoverEntry entry = session.HandoverLog.Entries[0];
             Assert.True(session.HandoverLog.Count == 1 && entry.Number == 1 && entry.From.CellId == 200 && entry.To.CellId == 300, "Handover across the reset was lost or misnumbered.");
         }
+
+        [GeneratedRegex(@"log scale (\S+\.\.\S+) B/s")]
+        private static partial Regex TrafficScaleLabel();
+
+        [GeneratedRegex(@"log, 5\.3 levels/decade")]
+        private static partial Regex LogScaleDensity();
     }
 }

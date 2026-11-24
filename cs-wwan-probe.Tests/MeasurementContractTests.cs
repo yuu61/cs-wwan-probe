@@ -17,53 +17,56 @@ namespace WwanProbe.Tests
             TrafficReading failed = new PdhTrafficCounter("wwan-probe test adapter that does not exist").Read();
             Assert.True(failed.RxKB is null && failed.TxKB is null && failed.BwMbps is null && failed.Error is not null, "Failed counters became zero.");
 
-            List<CounterSample> samples = new List<CounterSample>
-            {
+            List<CounterSample> samples =
+            [
                 new CounterSample(@"\Network Interface(test)\Current Bandwidth", 1000000, 0),
                 new CounterSample(@"\Network Interface(test)\Bytes Received/sec", 0, 0),
                 new CounterSample(@"\Network Interface(test)\Bytes Sent/sec", 0, 1),
-            };
+            ];
             TrafficReading traffic = TrafficReading.FromSamples(samples);
             Assert.True(traffic.RxKB == 0 && traffic.TxKB == 0 && traffic.BwMbps == 1 && traffic.Error is null, "Valid zero was treated as missing.");
             samples[2] = samples[2] with { Status = 0xC0000BC6 };
             traffic = TrafficReading.FromSamples(samples);
             Assert.True(traffic.RxKB == 0 && traffic.TxKB is null && traffic.Error is not null, "Invalid counter status was accepted.");
-            traffic = TrafficReading.FromSamples(Array.Empty<CounterSample>());
+            traffic = TrafficReading.FromSamples([]);
             Assert.True(traffic.RxKB is null && traffic.Error is not null, "An empty counter response became zero.");
         }
 
         // Only device reads are simulated; the production adapter, snapshot, history, CSV and frame code run.
-        private static FakeModem Fixture() => new FakeModem
+        private static FakeModem Fixture()
         {
-            Cells = new CellsInfo
+            return new FakeModem
             {
-                ServingLte = new[]
+                Cells = new CellsInfo
                 {
-                    Fixtures.LteCell(100, "", 255, -11, 100, pci: 10, tac: 20, ta: 3),
-                    Fixtures.LteCell(200, "44010", -90, -10, 1300, pci: 11, tac: 20, ta: 4),
-                    Fixtures.LteCell(300, "44010", 255, 255, 6300),
+                    ServingLte =
+                    [
+                        Fixtures.LteCell(100, "", 255, -11, 100, pci: 10, tac: 20, ta: 3),
+                        Fixtures.LteCell(200, "44010", -90, -10, 1300, pci: 11, tac: 20, ta: 4),
+                        Fixtures.LteCell(300, "44010", 255, 255, 6300),
+                    ],
                 },
-            },
-        }.WithIntelStatus(At.Responses(
-            ("AT+MTSM=1", At.Response("+MTSM: 40")),
-            ("AT+XCESQ?", At.Response("+XCESQ: 0,99,99,255,255,19,58,20,255,255,255,255")),
-            ("AT+XMCI=0", At.Response())));
+            }.WithIntelStatus(At.Responses(
+                ("AT+MTSM=1", At.Response("+MTSM: 40")),
+                ("AT+XCESQ?", At.Response("+XCESQ: 0,99,99,255,255,19,58,20,255,255,255,255")),
+                ("AT+XMCI=0", At.Response())));
+        }
 
-        private static readonly FakeTraffic FailedTraffic = new FakeTraffic { Reading = new TrafficReading(null, null, null, "counter unavailable") };
+        private static readonly FakeTraffic FailedTraffic = new() { Reading = new TrafficReading(null, null, null, "counter unavailable") };
 
         [Fact]
         public void PrimaryIdentityMissingMeasurementsCarrierAlignmentCsvHistoryAndFrame()
         {
             FakeModem modem = Fixture();
             LteSnapshot snapshot = LteSnapshot.Take(modem, At.Intel, FailedTraffic, null, null);
-            Assert.True(snapshot.Error is null && snapshot.TrafficError!.Contains("counter unavailable"), "A traffic failure invalidated the whole observation.");
+            Assert.True(snapshot.Error is null && snapshot.TrafficError!.Contains("counter unavailable", StringComparison.Ordinal), "A traffic failure invalidated the whole observation.");
             Assert.True(snapshot.PrimaryCell!.CellId == 100 && snapshot.Serving.Count == 3 && snapshot.SecondaryCells.Count == 2, "Cell roles were changed by missing RSRP.");
             Assert.True(snapshot.PrimaryCell.Provider == "44010" && snapshot.PrimaryCell.Ta == 3 && snapshot.PrimaryCell.RsrqDb == -11, "Primary metadata was lost.");
             Assert.True(snapshot.PrimaryCell.RsrpDbm is null && snapshot.PrimaryCell.Quality is null, "Missing RSRP became a classified signal.");
             Assert.True(snapshot.TempC == 40 && snapshot.Rssnr == 10 && snapshot.Ca is null && snapshot.Neighbors!.Count == 0, "AT status was lost.");
 
             // The background sampler builds the same snapshot as the foreground call.
-            MonitorSampler sampler = new MonitorSampler(() => LteSnapshot.Take(modem, At.Intel, FailedTraffic, null, null));
+            MonitorSampler sampler = new(() => LteSnapshot.Take(modem, At.Intel, FailedTraffic, null, null));
             sampler.Start();
             Assert.True(SpinWait.SpinUntil(() => sampler.IsCompleted, 10000));
             LteSnapshot background = sampler.Receive();
@@ -78,12 +81,12 @@ namespace WwanProbe.Tests
             Dictionary<string, object?> row = SnapshotLog.ToRow(snapshot);
             Assert.True(Equals(row["CellID"], 100L) && row["RSRP_dBm"] is null && (string?)row["SCell_EARFCN"] == "1300+6300" && (string?)row["SCell_RSRP_dBm"] == "-90+",
                 "CSV promoted or lost a carrier, or misaligned missing SCell fields.");
-            MonitorView view = new MonitorView { Unicode = false };
+            MonitorView view = new() { Unicode = false };
             string text = Fixtures.Text(MonitorFrame.Build(session, view, 120));
-            Assert.Contains("RSRP: n/a  RSRQ: -11 dB", text);
-            Assert.Contains("CellID:100", text);
-            Assert.Contains("BW: n/a   RX: n/a   TX: n/a", text);
-            Assert.Contains("Traffic: counter unavailable", text);
+            Assert.Contains("RSRP: n/a  RSRQ: -11 dB", text, StringComparison.Ordinal);
+            Assert.Contains("CellID:100", text, StringComparison.Ordinal);
+            Assert.Contains("BW: n/a   RX: n/a   TX: n/a", text, StringComparison.Ordinal);
+            Assert.Contains("Traffic: counter unavailable", text, StringComparison.Ordinal);
 
             string csvPath = Fixtures.TempFile();
             try
@@ -92,7 +95,7 @@ namespace WwanProbe.Tests
                 SnapshotLog.Append(csvPath, snapshot);
                 Dictionary<string, string> csv = Assert.Single(Fixtures.ReadCsv(csvPath));
                 Assert.Equal(SnapshotLog.Columns, csv.Keys);
-                Assert.True(csv["CellID"] == "100" && csv["RSRP_dBm"] == "" && csv["RX_KBps"] == "" && csv["Error"].Contains("Traffic: counter unavailable"),
+                Assert.True(csv["CellID"] == "100" && string.IsNullOrEmpty(csv["RSRP_dBm"]) && string.IsNullOrEmpty(csv["RX_KBps"]) && csv["Error"].Contains("Traffic: counter unavailable", StringComparison.Ordinal),
                     "CSV serialization lost missing values or diagnostics.");
                 Assert.Equal("None", csv["Downgrade"]);
             }
@@ -116,22 +119,22 @@ namespace WwanProbe.Tests
         {
             MonitorSession session = Fixtures.Session();
             session.AddSnapshot(LteSnapshot.Take(Fixture(), At.Intel, FailedTraffic, null, null));
-            MonitorView view = new MonitorView { Unicode = false };
-            RatConfig rat = new RatConfig { Allowed = "Automatic", AllowedRats = new[] { "UMTS", "LTE" } };
+            MonitorView view = new() { Unicode = false };
+            RatConfig rat = new() { Allowed = "Automatic", AllowedRats = ["UMTS", "LTE"] };
             session.Summary = new ModemSummary { Model = "Test", RatConfig = rat, LegacyAllowed = Downgrade.IsLegacyRatAllowed(rat.AllowedRats) };
             Assert.True(session.Summary.LegacyAllowed);
-            Assert.Contains("2G/3G enabled", Fixtures.Text(MonitorFrame.Build(session, view, 120)));
-            rat = rat with { Allowed = "2G/3G disabled", AllowedRats = new[] { "LTE", "NR" } };
+            Assert.Contains("2G/3G enabled", Fixtures.Text(MonitorFrame.Build(session, view, 120)), StringComparison.Ordinal);
+            rat = rat with { Allowed = "2G/3G disabled", AllowedRats = ["LTE", "NR"] };
             session.Summary = new ModemSummary { Model = "Test", RatConfig = rat, LegacyAllowed = Downgrade.IsLegacyRatAllowed(rat.AllowedRats) };
             Assert.False(session.Summary.LegacyAllowed);
-            Assert.DoesNotContain("downgrade possible", Fixtures.Text(MonitorFrame.Build(session, view, 120)));
+            Assert.DoesNotContain("downgrade possible", Fixtures.Text(MonitorFrame.Build(session, view, 120)), StringComparison.Ordinal);
         }
 
         // The startup summary reads the RAT configuration once and derives the legacy capability from it.
         [Fact]
         public void SummaryReadsConfigurationOverAt()
         {
-            FakeModem modem = new FakeModem();
+            FakeModem modem = new();
             modem.AtHandlers["Intel AT Tunnel"] = c => c switch
             {
                 "AT" or "AT+XMCI=?" => At.Response(),

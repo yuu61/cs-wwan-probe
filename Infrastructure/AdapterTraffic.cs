@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 namespace WwanProbe.Infrastructure
 {
     // Network interface traffic. Missing values stay null (a failed counter is not 0) and Error tells why.
-    public sealed record TrafficReading(double? BwMbps, double? RxKB, double? TxKB, string? Error)
+    internal sealed record TrafficReading(double? BwMbps, double? RxKB, double? TxKB, string? Error)
     {
         // PDH_CSTATUS_VALID_DATA (0) and PDH_CSTATUS_NEW_DATA (1) are both usable.
         public static TrafficReading FromSamples(IEnumerable<CounterSample> samples)
@@ -21,23 +21,21 @@ namespace WwanProbe.Infrastructure
         }
     }
 
-    public sealed record CounterSample(string Path, double CookedValue, uint Status);
+    internal sealed record CounterSample(string Path, double CookedValue, uint Status);
 
-    public interface ITrafficCounter
+    internal interface ITrafficCounter
     {
         TrafficReading Read();
     }
 
     // Performance counters of the mobile broadband adapter through PDH. English counter names work on
     // localized Windows. One call blocks ~1 s: rate counters need two collections.
-    public sealed class PdhTrafficCounter : ITrafficCounter
+    internal sealed partial class PdhTrafficCounter(string instanceName = "Generic Mobile Broadband Adapter") : ITrafficCounter
     {
         private const uint PdhFmtDouble = 0x00000200;
         private const uint PdhFmtNoCap100 = 0x00008000;
 
-        private readonly string instanceName;
-
-        public PdhTrafficCounter(string instanceName = "Generic Mobile Broadband Adapter") => this.instanceName = instanceName;
+        private readonly string instanceName = instanceName;
 
         [StructLayout(LayoutKind.Explicit)]
         private struct PdhFmtCounterValue
@@ -46,16 +44,16 @@ namespace WwanProbe.Infrastructure
             [FieldOffset(8)] public double DoubleValue;
         }
 
-        [DllImport("pdh.dll", CharSet = CharSet.Unicode, EntryPoint = "PdhOpenQueryW")]
-        private static extern uint PdhOpenQuery(string? dataSource, IntPtr userData, out IntPtr query);
-        [DllImport("pdh.dll", CharSet = CharSet.Unicode, EntryPoint = "PdhAddEnglishCounterW")]
-        private static extern uint PdhAddEnglishCounter(IntPtr query, string path, IntPtr userData, out IntPtr counter);
-        [DllImport("pdh.dll")]
-        private static extern uint PdhCollectQueryData(IntPtr query);
-        [DllImport("pdh.dll")]
-        private static extern uint PdhGetFormattedCounterValue(IntPtr counter, uint format, IntPtr type, out PdhFmtCounterValue value);
-        [DllImport("pdh.dll")]
-        private static extern uint PdhCloseQuery(IntPtr query);
+        [LibraryImport("pdh.dll", EntryPoint = "PdhOpenQueryW", StringMarshalling = StringMarshalling.Utf16)]
+        private static partial uint PdhOpenQuery(string? dataSource, IntPtr userData, out IntPtr query);
+        [LibraryImport("pdh.dll", EntryPoint = "PdhAddEnglishCounterW", StringMarshalling = StringMarshalling.Utf16)]
+        private static partial uint PdhAddEnglishCounter(IntPtr query, string path, IntPtr userData, out IntPtr counter);
+        [LibraryImport("pdh.dll")]
+        private static partial uint PdhCollectQueryData(IntPtr query);
+        [LibraryImport("pdh.dll")]
+        private static partial uint PdhGetFormattedCounterValue(IntPtr counter, uint format, IntPtr type, out PdhFmtCounterValue value);
+        [LibraryImport("pdh.dll")]
+        private static partial uint PdhCloseQuery(IntPtr query);
 
         public TrafficReading Read()
         {
@@ -72,23 +70,20 @@ namespace WwanProbe.Infrastructure
         private List<CounterSample> Collect()
         {
             string[] paths =
-            {
+            [
                 $@"\Network Interface({instanceName})\Current Bandwidth",
                 $@"\Network Interface({instanceName})\Bytes Received/sec",
                 $@"\Network Interface({instanceName})\Bytes Sent/sec",
-            };
+            ];
             Check(PdhOpenQuery(null, IntPtr.Zero, out IntPtr query), "open a performance counter query");
             try
             {
                 IntPtr[] counters = new IntPtr[paths.Length];
-                for (int i = 0; i < paths.Length; i++)
-                {
-                    Check(PdhAddEnglishCounter(query, paths[i], IntPtr.Zero, out counters[i]), paths[i]);
-                }
+                for (int i = 0; i < paths.Length; i++) Check(PdhAddEnglishCounter(query, paths[i], IntPtr.Zero, out counters[i]), paths[i]);
                 Check(PdhCollectQueryData(query), "collect performance counters");
                 Thread.Sleep(1000);
                 Check(PdhCollectQueryData(query), "collect performance counters");
-                List<CounterSample> samples = new List<CounterSample>();
+                List<CounterSample> samples = [];
                 for (int i = 0; i < paths.Length; i++)
                 {
                     uint status = PdhGetFormattedCounterValue(counters[i], PdhFmtDouble | PdhFmtNoCap100, IntPtr.Zero, out PdhFmtCounterValue value);
@@ -98,7 +93,7 @@ namespace WwanProbe.Infrastructure
             }
             finally
             {
-                PdhCloseQuery(query);
+                _ = PdhCloseQuery(query);
             }
         }
 

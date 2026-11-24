@@ -9,30 +9,29 @@ namespace WwanProbe.Infrastructure.Gnss
 
     // Id is the NMEA ID as reported (GLONASS 65-96 in GP/GN and GL sentences alike);
     // Signal is the NMEA 4.10 signal ID ("" before 4.10); missing values are null.
-    public sealed record NmeaSatellite(string System, int Id, string Signal, int? ElevationDeg, int? AzimuthDeg, int? SnrDbHz, bool Used);
+    internal sealed record NmeaSatellite(string System, int Id, string Signal, int? ElevationDeg, int? AzimuthDeg, int? SnrDbHz, bool Used);
 
     // Dimension (GSA: NoFix | 2D | 3D); Quality (GGA fix quality); SatellitesUsed (GGA);
     // AltitudeMslM / GeoidSeparationM (GGA, metres); Valid (RMC status A); Mode (RMC mode).
     // Each value is null when its sentence has not been received recently.
-    public sealed record NmeaFix(string? Dimension, string? Quality, int? SatellitesUsed, double? AltitudeMslM,
+    internal sealed record NmeaFix(string? Dimension, string? Quality, int? SatellitesUsed, double? AltitudeMslM,
         double? GeoidSeparationM, bool? Valid, string? Mode);
 
-    public sealed record NmeaReport(IReadOnlyList<NmeaSatellite> Satellites, int UsedCount, NmeaFix Fix);
+    internal sealed record NmeaReport(IReadOnlyList<NmeaSatellite> Satellites, int UsedCount, NmeaFix Fix);
 
     // Complete, checksum-valid sentences and the incomplete tail to prepend to the next chunk.
-    public sealed record NmeaSplit(IReadOnlyList<string> Sentences, string Rest);
+    internal sealed record NmeaSplit(IReadOnlyList<string> Sentences, string Rest);
 
-    public static class Nmea
+    internal static partial class Nmea
     {
         // Display order of the constellations.
-        public static readonly IReadOnlyList<string> Systems = new[] { "GPS", "QZSS", "SBAS", "GLONASS", "Galileo", "BeiDou", "NavIC", "Unknown" };
+        public static readonly IReadOnlyList<string> Systems = ["GPS", "QZSS", "SBAS", "GLONASS", "Galileo", "BeiDou", "NavIC", "Unknown"];
 
         // Sentences older than this are dropped from reports.
         public const int MaxAgeSeconds = 10;
 
-        private static readonly Regex SentencePattern = new Regex(@"\$([^$*\r\n]+)\*([0-9A-Fa-f]{2})", RegexOptions.CultureInvariant);
 
-        private static readonly Dictionary<string, string> TalkerSystems = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        private static readonly Dictionary<string, string> TalkerSystems = new(StringComparer.OrdinalIgnoreCase)
         {
             ["GL"] = "GLONASS",
             ["GA"] = "Galileo",
@@ -46,50 +45,58 @@ namespace WwanProbe.Infrastructure.Gnss
         // Constellation of satellite id. GP/GN talkers mix systems, told apart by the NMEA ID ranges.
         public static string SatelliteSystem(string talker, int id)
         {
-            if (TalkerSystems.TryGetValue(talker, out string? system)) return system;
-            if (id >= 1 && id <= 32) return "GPS";
-            if ((id >= 33 && id <= 64) || (id >= 120 && id <= 158)) return "SBAS";
-            if (id >= 65 && id <= 96) return "GLONASS";
-            if (id >= 193 && id <= 202) return "QZSS";
-            return "Unknown";
+            return TalkerSystems.TryGetValue(talker, out string? system)
+                ? system
+                : id switch
+                {
+                    >= 1 and <= 32 => "GPS",
+                    (>= 33 and <= 64) or (>= 120 and <= 158) => "SBAS",
+                    >= 65 and <= 96 => "GLONASS",
+                    >= 193 and <= 202 => "QZSS",
+                    _ => "Unknown",
+                };
         }
 
         // Splits a stream whose sentences can span driver events.
         public static NmeaSplit Split(string buffer)
         {
-            List<string> sentences = new List<string>();
+            List<string> sentences = [];
             int end = 0;
-            foreach (Match match in SentencePattern.Matches(buffer))
+            foreach (Match match in SentencePattern().Matches(buffer))
             {
                 end = match.Index + match.Length;
                 int checksum = 0;
                 foreach (char c in match.Groups[1].Value) checksum ^= c;
                 if (checksum == Convert.ToInt32(match.Groups[2].Value, 16)) sentences.Add(match.Value);
             }
-            string rest = buffer.Substring(end);
+            string rest = buffer[end..];
             int start = rest.LastIndexOf('$');
             // A tail without '$' is noise; an overlong one is corrupt (sentences are <= 82 chars).
-            rest = start < 0 || rest.Length - start > 256 ? "" : rest.Substring(start);
+            rest = start < 0 || rest.Length - start > 256 ? "" : rest[start..];
             return new NmeaSplit(sentences, rest);
         }
 
         internal static int? Integer(string? text, int min, int max)
         {
-            if (!int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out int value)) return null;
-            if (value < min || value > max) return null;
-            return value;
+            return int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out int value) && value >= min && value <= max
+                ? value
+                : null;
         }
 
         internal static double? Decimal(string? text)
         {
-            if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double value)) return null;
-            return double.IsFinite(value) ? value : null;
+            return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double value) && double.IsFinite(value)
+                ? value
+                : null;
         }
+
+        [GeneratedRegex(@"\$([^$*\r\n]+)\*([0-9A-Fa-f]{2})", RegexOptions.CultureInvariant)]
+        private static partial Regex SentencePattern();
     }
 
     // Parser state: GSV cycles per talker and signal (Views / Pending), GSA per talker and system ID
     // (Used) and the latest GSA / GGA / RMC fix values (Fix).
-    public sealed class NmeaSatelliteState
+    internal sealed partial class NmeaSatelliteState
     {
         private sealed record View(DateTimeOffset Received, IReadOnlyList<NmeaSatellite> Satellites);
 
@@ -97,7 +104,7 @@ namespace WwanProbe.Infrastructure.Gnss
         {
             public required int Total { get; init; }
             public int Next { get; set; } = 1;
-            public List<NmeaSatellite> Satellites { get; } = new List<NmeaSatellite>();
+            public List<NmeaSatellite> Satellites { get; } = [];
         }
 
         private sealed record UsedEntry(DateTimeOffset Received, IReadOnlyList<string> Keys);
@@ -116,7 +123,7 @@ namespace WwanProbe.Infrastructure.Gnss
         }
 
         // GSA system ID (NMEA 4.10) -> talker of that constellation.
-        private static readonly Dictionary<string, string> SystemTalkers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        private static readonly Dictionary<string, string> SystemTalkers = new(StringComparer.OrdinalIgnoreCase)
         {
             ["1"] = "GP",
             ["2"] = "GL",
@@ -128,14 +135,14 @@ namespace WwanProbe.Infrastructure.Gnss
 
         // The L860-GL swaps GSA system IDs 4 and 5 (QZSS 195 under 4, BeiDou 21 under 5; seen 2026-09-28),
         // so a used satellite not in view under its nominal system is matched to the other of this pair.
-        private static readonly Dictionary<string, string> SwappedSystems = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        private static readonly Dictionary<string, string> SwappedSystems = new(StringComparer.OrdinalIgnoreCase)
         {
             ["BeiDou"] = "QZSS",
             ["QZSS"] = "BeiDou",
         };
 
         // GGA fix quality and GSA fix type codes.
-        private static readonly Dictionary<string, string> FixQualities = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        private static readonly Dictionary<string, string> FixQualities = new(StringComparer.OrdinalIgnoreCase)
         {
             ["0"] = "Invalid",
             ["1"] = "GPS",
@@ -148,7 +155,7 @@ namespace WwanProbe.Infrastructure.Gnss
             ["8"] = "Simulation",
         };
 
-        private static readonly Dictionary<string, string> FixDimensions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        private static readonly Dictionary<string, string> FixDimensions = new(StringComparer.OrdinalIgnoreCase)
         {
             ["1"] = "NoFix",
             ["2"] = "2D",
@@ -156,7 +163,7 @@ namespace WwanProbe.Infrastructure.Gnss
         };
 
         // RMC mode indicator (NMEA 2.3+; F / P / R from 4.0).
-        private static readonly Dictionary<string, string> FixModes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        private static readonly Dictionary<string, string> FixModes = new(StringComparer.OrdinalIgnoreCase)
         {
             ["A"] = "Autonomous",
             ["D"] = "Differential",
@@ -169,20 +176,15 @@ namespace WwanProbe.Infrastructure.Gnss
             ["S"] = "Simulator",
         };
 
-        private static readonly Regex SentenceType = new Regex("^(?<talker>[A-Z]{2})(?<type>GSV|GSA|GGA|RMC)$",
-            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-        private readonly Dictionary<string, View> views = new Dictionary<string, View>(StringComparer.OrdinalIgnoreCase);
-        private readonly Dictionary<string, Pending> pending = new Dictionary<string, Pending>(StringComparer.OrdinalIgnoreCase);
-        private readonly Dictionary<string, UsedEntry> used = new Dictionary<string, UsedEntry>(StringComparer.OrdinalIgnoreCase);
-        private readonly Dictionary<string, FixValues> fix = new Dictionary<string, FixValues>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, View> views = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, Pending> pending = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, UsedEntry> used = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, FixValues> fix = new(StringComparer.OrdinalIgnoreCase);
 
         // Label for an NMEA code; an unlisted code is kept visible instead of being dropped.
         private static string? CodeLabel(Dictionary<string, string> labels, string? code)
-        {
-            if (string.IsNullOrEmpty(code)) return null;
-            return labels.TryGetValue(code, out string? label) ? label : $"Unknown ({code})";
-        }
+            => string.IsNullOrEmpty(code) ? null : labels.GetValueOrDefault(code, $"Unknown ({code})");
 
         private static bool Is(string? a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 
@@ -191,7 +193,10 @@ namespace WwanProbe.Infrastructure.Gnss
         private void SetFixSource(string source, string talker, DateTimeOffset now, FixValues values)
         {
             if (fix.TryGetValue(source, out FixValues? previous) && Is(previous.Talker, "GN") && !Is(talker, "GN") &&
-                (now - previous.Received).TotalSeconds <= Nmea.MaxAgeSeconds) return;
+                (now - previous.Received).TotalSeconds <= Nmea.MaxAgeSeconds)
+            {
+                return;
+            }
             fix[source] = values with { Received = now, Talker = talker };
         }
 
@@ -200,12 +205,13 @@ namespace WwanProbe.Infrastructure.Gnss
         // fields (never the position); other sentence types are ignored.
         public void Add(string sentence, DateTimeOffset now)
         {
-            string[] fields = sentence.Substring(1, sentence.LastIndexOf('*') - 1).Split(',');
-            Match m = SentenceType.Match(fields[0]);
+            string[] fields = sentence[1..sentence.LastIndexOf('*')].Split(',');
+            Match m = SentenceType().Match(fields[0]);
             if (!m.Success) return;
             string talker = m.Groups["talker"].Value;
             string type = m.Groups["type"].Value.ToUpperInvariant();
             string? F(int i) => i >= 0 && i < fields.Length ? fields[i] : null;
+
             if (type == "GGA")
             {
                 // 6 quality, 7 satellites used, 9-10 altitude above mean sea level, 11-12 geoid separation.
@@ -236,10 +242,9 @@ namespace WwanProbe.Infrastructure.Gnss
                 SetFixSource("GSA", talker, now, new FixValues { Dimension = CodeLabel(FixDimensions, fields[2]) });
                 string systemId = fields.Length > 18 ? fields[18] : "";
                 string systemTalker = SystemTalkers.TryGetValue(systemId, out string? t) ? t : talker;
-                List<string> keys = fields.Skip(3).Take(12).Select(f => Nmea.Integer(f, 1, 999))
+                List<string> keys = [.. fields.Skip(3).Take(12).Select(f => Nmea.Integer(f, 1, 999))
                     .Where(id => id is not null)
-                    .Select(id => $"{Nmea.SatelliteSystem(systemTalker, id!.Value)}:{id.Value.ToString(CultureInfo.InvariantCulture)}")
-                    .ToList();
+                    .Select(id => $"{Nmea.SatelliteSystem(systemTalker, id!.Value)}:{id.Value.ToString(CultureInfo.InvariantCulture)}")];
                 used[$"{talker}:{systemId}"] = new UsedEntry(now, keys);
                 return;
             }
@@ -252,7 +257,7 @@ namespace WwanProbe.Infrastructure.Gnss
             if (number == 1) pending[key] = new Pending { Total = total.Value };
             if (!pending.TryGetValue(key, out Pending? cycle) || cycle.Total != total || cycle.Next != number)
             {
-                pending.Remove(key);
+                _ = pending.Remove(key);
                 return;
             }
             for (int i = 4; i + 3 < fields.Length; i += 4)
@@ -265,8 +270,8 @@ namespace WwanProbe.Infrastructure.Gnss
             cycle.Next++;
             if (number == total)
             {
-                views[key] = new View(now, cycle.Satellites.ToArray());
-                pending.Remove(key);
+                views[key] = new View(now, [.. cycle.Satellites]);
+                _ = pending.Remove(key);
             }
         }
 
@@ -287,7 +292,7 @@ namespace WwanProbe.Infrastructure.Gnss
         {
             foreach (string key in table.Keys.ToList())
             {
-                if ((now - received(table[key])).TotalSeconds > maxAgeSeconds) table.Remove(key);
+                if ((now - received(table[key])).TotalSeconds > maxAgeSeconds) _ = table.Remove(key);
             }
         }
 
@@ -301,31 +306,30 @@ namespace WwanProbe.Infrastructure.Gnss
             Expire(views, v => v.Received, now, maxAgeSeconds);
             Expire(used, u => u.Received, now, maxAgeSeconds);
             Expire(fix, f => f.Received, now, maxAgeSeconds);
-            HashSet<string> inView = new HashSet<string>();
+            HashSet<string> inView = [];
             foreach (View view in views.Values)
             {
-                foreach (NmeaSatellite s in view.Satellites) inView.Add(SatelliteKey(s));
+                foreach (NmeaSatellite s in view.Satellites) _ = inView.Add(SatelliteKey(s));
             }
-            HashSet<string> usedKeys = new HashSet<string>();
+            HashSet<string> usedKeys = [];
             foreach (UsedEntry entry in used.Values)
             {
-                foreach (string key in entry.Keys) usedKeys.Add(ResolveUsedKey(key, inView));
+                foreach (string key in entry.Keys) _ = usedKeys.Add(ResolveUsedKey(key, inView));
             }
             // Used in the fix first, then strongest, then highest; a missing SNR or elevation sorts last.
             // Remaining ties: constellation order, ID, signal.
-            List<NmeaSatellite> satellites = views.Values.SelectMany(v => v.Satellites)
+            List<NmeaSatellite> satellites = [.. views.Values.SelectMany(v => v.Satellites)
                 .Select(s => s with { Used = usedKeys.Contains(SatelliteKey(s)) })
                 .OrderByDescending(s => s.Used)
                 .ThenByDescending(s => s.SnrDbHz ?? -1)
                 .ThenByDescending(s => s.ElevationDeg ?? -1)
                 .ThenBy(s => SystemOrder(s.System))
                 .ThenBy(s => s.Id)
-                .ThenBy(s => s.Signal, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            fix.TryGetValue("GSA", out FixValues? gsa);
-            fix.TryGetValue("GGA", out FixValues? gga);
-            fix.TryGetValue("RMC", out FixValues? rmc);
-            NmeaFix fixState = new NmeaFix(gsa?.Dimension, gga?.Quality, gga?.SatellitesUsed, gga?.AltitudeMslM,
+                .ThenBy(s => s.Signal, StringComparer.OrdinalIgnoreCase)];
+            FixValues? gsa = fix.GetValueOrDefault("GSA");
+            FixValues? gga = fix.GetValueOrDefault("GGA");
+            FixValues? rmc = fix.GetValueOrDefault("RMC");
+            NmeaFix fixState = new(gsa?.Dimension, gga?.Quality, gga?.SatellitesUsed, gga?.AltitudeMslM,
                 gga?.GeoidSeparationM, rmc?.Valid, rmc?.Mode);
             return new NmeaReport(satellites, usedKeys.Count, fixState);
         }
@@ -340,5 +344,8 @@ namespace WwanProbe.Infrastructure.Gnss
             }
             return -1;
         }
+
+        [GeneratedRegex("^(?<talker>[A-Z]{2})(?<type>GSV|GSA|GGA|RMC)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+        private static partial Regex SentenceType();
     }
 }

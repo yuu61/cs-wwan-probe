@@ -10,18 +10,18 @@ namespace WwanProbe.Infrastructure.Gnss
     // State file written by the helper (JSON, no coordinates):
     //   Status = Starting | Receiving | Error; Error; UpdatedUnixMs (heartbeat);
     //   NmeaUnixMs (last valid sentence, null = none yet); Satellites; UsedCount; Fix (see Nmea.cs).
-    public sealed class NmeaHelperState
+    internal sealed class NmeaHelperState
     {
         public string Status { get; set; } = "Starting";
         public string? Error { get; set; }
         public long UpdatedUnixMs { get; set; }
         public long? NmeaUnixMs { get; set; }
-        public List<NmeaSatellite> Satellites { get; set; } = new List<NmeaSatellite>();
+        public List<NmeaSatellite> Satellites { get; set; } = [];
         public int UsedCount { get; set; }
         public NmeaFix? Fix { get; set; }
     }
 
-    public static class NmeaStateFile
+    internal static class NmeaStateFile
     {
         // Writes the whole state to a temporary file and replaces the previous one, so a reader
         // never sees a partial file. The replace fails while the monitor is reading the file (even
@@ -35,7 +35,7 @@ namespace WwanProbe.Infrastructure.Gnss
                 File.Move(temporary, path, true);
                 return true;
             }
-            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 return false;
             }
@@ -49,29 +49,29 @@ namespace WwanProbe.Infrastructure.Gnss
         }
     }
 
-    public sealed record NmeaSystemCount(string System, int InView, int Used);
+    internal sealed record NmeaSystemCount(string System, int InView, int Used);
 
     // Helper state converted for display:
     //   Status: Starting | Receiving | Stale (heartbeat older than 10 s) | Unavailable (Error)
     //   Fix = the receiver's fix state, null unless Receiving;
     //   InView = distinct satellites, Used = distinct satellites in the fix,
     //   Systems = per-constellation counts in display order.
-    public sealed record NmeaObservation
+    internal sealed record NmeaObservation
     {
         public string Status { get; init; } = "Starting";
         public string? Error { get; init; }
         public string? UpdatedUtc { get; init; }
         public bool NmeaReceived { get; init; }
-        public IReadOnlyList<NmeaSatellite> Satellites { get; init; } = Array.Empty<NmeaSatellite>();
+        public IReadOnlyList<NmeaSatellite> Satellites { get; init; } = [];
         public int InView { get; init; }
         public int Used { get; init; }
-        public IReadOnlyList<NmeaSystemCount> Systems { get; init; } = Array.Empty<NmeaSystemCount>();
+        public IReadOnlyList<NmeaSystemCount> Systems { get; init; } = [];
         public NmeaFix? Fix { get; init; }
 
         public static NmeaObservation FromState(NmeaHelperState? state, string? receiverError = null, bool helperExited = false,
             int? exitCode = null, DateTimeOffset? now = null)
         {
-            NmeaObservation observation = new NmeaObservation();
+            NmeaObservation observation = new();
             if (!string.IsNullOrEmpty(receiverError)) return observation with { Status = "Unavailable", Error = receiverError };
             if (state is not null && state.Status == "Error") return observation with { Status = "Unavailable", Error = state.Error };
             if (helperExited)
@@ -84,11 +84,11 @@ namespace WwanProbe.Infrastructure.Gnss
             observation = observation with { UpdatedUtc = updated.ToString("o", CultureInfo.InvariantCulture) };
             if (((now ?? DateTimeOffset.UtcNow) - updated).TotalSeconds > 10) return observation with { Status = "Stale" };
             if (state.Status != "Receiving") return observation;
-            List<NmeaSatellite> satellites = state.Satellites ?? new List<NmeaSatellite>();
-            List<NmeaSystemCount> systems = new List<NmeaSystemCount>();
+            List<NmeaSatellite> satellites = state.Satellites ?? [];
+            List<NmeaSystemCount> systems = [];
             foreach (string system in Nmea.Systems)
             {
-                List<NmeaSatellite> members = satellites.Where(s => s.System == system).ToList();
+                List<NmeaSatellite> members = [.. satellites.Where(s => s.System == system)];
                 if (members.Count == 0) continue;
                 systems.Add(new NmeaSystemCount(system, members.Select(s => s.Id).Distinct().Count(),
                     members.Where(s => s.Used).Select(s => s.Id).Distinct().Count()));
@@ -111,20 +111,13 @@ namespace WwanProbe.Infrastructure.Gnss
     // (UAC when the monitor is not) and publishes a state file about once a second.
     // A non-elevated monitor cannot terminate the helper: it asks the helper to stop through a
     // stop file, and the helper also exits when the monitor process ends.
-    public sealed class NmeaReceiver
+    internal sealed class NmeaReceiver(Process? process, string? stateDir, string? error)
     {
         public const string HelperArgument = "--nmea-helper";
 
-        public NmeaReceiver(Process? process, string? stateDir, string? error)
-        {
-            Process = process;
-            StateDir = stateDir;
-            Error = error;
-        }
-
-        public Process? Process { get; }
-        public string? StateDir { get; }
-        public string? Error { get; }
+        public Process? Process { get; } = process;
+        public string? StateDir { get; } = stateDir;
+        public string? Error { get; } = error;
 
         public static bool IsAdministrator()
         {
@@ -139,15 +132,15 @@ namespace WwanProbe.Infrastructure.Gnss
             try
             {
                 stateDir = Path.Combine(Path.GetTempPath(), "wwan-nmea-" + Guid.NewGuid().ToString("N"));
-                Directory.CreateDirectory(stateDir);
+                _ = Directory.CreateDirectory(stateDir);
                 using Process self = Process.GetCurrentProcess();
                 (string file, List<string> arguments) = SelfCommand();
-                arguments.AddRange(new[]
-                {
+                arguments.AddRange(
+                [
                     HelperArgument, stateDir, self.Id.ToString(CultureInfo.InvariantCulture),
                     self.StartTime.ToUniversalTime().Ticks.ToString(CultureInfo.InvariantCulture),
-                });
-                ProcessStartInfo start = new ProcessStartInfo(file)
+                ]);
+                ProcessStartInfo start = new(file)
                 {
                     UseShellExecute = true,
                     WindowStyle = ProcessWindowStyle.Hidden,
@@ -223,16 +216,16 @@ namespace WwanProbe.Infrastructure.Gnss
         // Windows command-line quoting (CommandLineToArgvW rules).
         private static string JoinArguments(IEnumerable<string> arguments)
         {
-            StringBuilder line = new StringBuilder();
+            StringBuilder line = new();
             foreach (string argument in arguments)
             {
-                if (line.Length > 0) line.Append(' ');
-                if (argument.Length > 0 && argument.IndexOfAny(new[] { ' ', '\t', '"' }) < 0)
+                if (line.Length > 0) _ = line.Append(' ');
+                if (argument.Length > 0 && argument.IndexOfAny([' ', '\t', '"']) < 0)
                 {
-                    line.Append(argument);
+                    _ = line.Append(argument);
                     continue;
                 }
-                line.Append('"');
+                _ = line.Append('"');
                 int backslashes = 0;
                 foreach (char c in argument)
                 {
@@ -241,19 +234,19 @@ namespace WwanProbe.Infrastructure.Gnss
                         backslashes++;
                         continue;
                     }
-                    line.Append('\\', c == '"' ? backslashes * 2 + 1 : backslashes);
+                    _ = line.Append('\\', c == '"' ? (backslashes * 2) + 1 : backslashes);
                     backslashes = 0;
-                    line.Append(c);
+                    _ = line.Append(c);
                 }
-                line.Append('\\', backslashes * 2);
-                line.Append('"');
+                _ = line.Append('\\', backslashes * 2);
+                _ = line.Append('"');
             }
             return line.ToString();
         }
     }
 
     // GNSS interface lookup and the single-listener lock (a named mutex any NMEA tool should take).
-    public static class GnssInterface
+    internal static class GnssInterface
     {
         public const string ClassGuid = "{3336e5e4-018a-4669-84c5-bd05f3bd368b}";
 
@@ -262,7 +255,7 @@ namespace WwanProbe.Infrastructure.Gnss
         {
             Windows.Devices.Enumeration.DeviceInformationCollection devices = TaskWait.Await(
                 Windows.Devices.Enumeration.DeviceInformation.FindAllAsync($"System.Devices.InterfaceClassGuid:=\"{ClassGuid}\""));
-            return devices.Select(d => d.Id).ToList();
+            return [.. devices.Select(d => d.Id)];
         }
 
         // Only one NMEA listener may run: each one resets the driver logging to disabled on exit,
@@ -270,7 +263,7 @@ namespace WwanProbe.Infrastructure.Gnss
         // Other tools that switch NMEA logging should take the same named mutex.
         public static Mutex EnterNmeaLock()
         {
-            Mutex mutex = new Mutex(true, @"Global\WwanProbeGnssNmea", out bool createdNew);
+            Mutex mutex = new(true, @"Global\WwanProbeGnssNmea", out bool createdNew);
             if (!createdNew)
             {
                 mutex.Dispose();

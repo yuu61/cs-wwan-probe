@@ -69,7 +69,7 @@ namespace WwanProbe.Tests
             AtStatus status = AtStatusParser.ParseStatus(profile, intel);
             Assert.Equal(52, status.TempC);
             Assert.Equal(5.5, status.Rssnr);
-            Assert.Equal(new double?[] { 10, 20 }, status.Ca!.BandwidthsMHz);
+            Assert.Equal([10, 20], status.Ca!.BandwidthsMHz);
             Assert.Equal(2, status.Cells!.Count);
             LteNeighbor neighbor = Assert.Single(status.Neighbors!);
             Assert.Equal(-110, neighbor.RsrpDbm);
@@ -88,9 +88,9 @@ namespace WwanProbe.Tests
             // Shortened real response (the recorded one lists more bands).
             RatConfig rat = AtStatusParser.ParseConfig(profile, At.Responses(("AT+XACT?", At.Response("+XACT: 4,2,1,1,2,4,5,8,101,103,118,141,171"))))!;
             Assert.Equal("3G+4G", rat.Allowed);
-            Assert.Equal(new[] { "UMTS", "LTE" }, rat.AllowedRats);
+            Assert.Equal(["UMTS", "LTE"], rat.AllowedRats);
             Assert.True(Downgrade.IsLegacyRatAllowed(rat.AllowedRats));
-            Assert.Equal(new[] { 1, 3, 18, 41, 71 }, rat.LteBands);
+            Assert.Equal([1, 3, 18, 41, 71], rat.LteBands);
             Assert.Equal("4G", rat.Preferred);
         }
 
@@ -115,7 +115,7 @@ namespace WwanProbe.Tests
             Assert.Equal(31, status.TempC);
             Assert.Equal(8.0, status.Rssnr);
             Assert.Equal(2, status.Ca!.Cells);
-            Assert.Equal(new double?[] { 20, 10 }, status.Ca.BandwidthsMHz);
+            Assert.Equal([20, 10], status.Ca.BandwidthsMHz);
             LteNeighbor neighbor = Assert.Single(status.Neighbors!);
             Assert.Equal(-88, neighbor.RsrpDbm);
             Assert.Equal(-3, neighbor.RsrqDb);
@@ -126,11 +126,11 @@ namespace WwanProbe.Tests
             Assert.Equal(0xDE10, serving.Tac);
             Assert.Equal(-100, serving.RsrpDbm);
 
-            quectel.Remove("AT+QCAINFO");
+            _ = quectel.Remove("AT+QCAINFO");
             status = AtStatusParser.ParseStatus(profile, quectel);
             Assert.Equal(-3.0, status.Rssnr);
             Assert.Equal(1, status.Ca!.Cells);
-            Assert.Equal(new double?[] { 20 }, status.Ca.BandwidthsMHz);
+            Assert.Equal([20], status.Ca.BandwidthsMHz);
             Assert.Equal(30, QuectelStatus.ParseQtemp(At.Response("+QTEMP: 30,28,27")));
 
             List<AtCell> endc = QuectelStatus.ParseQengServing(At.Response(
@@ -159,10 +159,10 @@ namespace WwanProbe.Tests
                 ("AT+QNWPREFCFG=\"lte_band\"", At.Response("+QNWPREFCFG: \"lte_band\",1:3:8")),
                 ("AT+QNWPREFCFG=\"nr5g_band\"", At.Response("+QNWPREFCFG: \"nr5g_band\",1:3:7:20:28:40:41:71:77:78:79")));
             RatConfig rat = AtStatusParser.ParseConfig(profile, prefs)!;
-            Assert.Contains("3G", rat.Allowed);
-            Assert.Equal(new[] { "UMTS", "LTE", "NR" }, rat.AllowedRats);
+            Assert.Contains("3G", rat.Allowed, StringComparison.Ordinal);
+            Assert.Equal(["UMTS", "LTE", "NR"], rat.AllowedRats);
             Assert.True(Downgrade.IsLegacyRatAllowed(rat.AllowedRats));
-            Assert.Equal(new[] { 1, 3, 8 }, rat.LteBands);
+            Assert.Equal([1, 3, 8], rat.LteBands);
             Assert.Equal(11, rat.NrBands.Count);
             Assert.Equal(10, rat.UmtsBands.Count);
             prefs["AT+QNWPREFCFG=\"mode_pref\""] = At.Response("+QNWPREFCFG: \"mode_pref\",LTE:NR5G");
@@ -172,8 +172,8 @@ namespace WwanProbe.Tests
             prefs["AT+QNWPREFCFG=\"nr5g_band\""] = "ERROR\r\n";
             rat = AtStatusParser.ParseConfig(profile, prefs)!;
             Assert.Equal("2G+4G", rat.Allowed);
-            Assert.Equal(new[] { "GSM", "LTE" }, rat.AllowedRats);
-            Assert.Equal(new[] { 3 }, rat.LteBands);
+            Assert.Equal(["GSM", "LTE"], rat.AllowedRats);
+            Assert.Equal([3], rat.LteBands);
             Assert.Empty(rat.NrBands);
         }
 
@@ -197,7 +197,7 @@ namespace WwanProbe.Tests
             AtStatus status = AtStatusParser.ParseStatus(profile, fibocom);
             Assert.Equal(45.3, status.TempC);
             Assert.Equal(6.5, status.Rssnr);
-            Assert.Equal(new double?[] { 20, 10 }, status.Ca!.BandwidthsMHz);
+            Assert.Equal([20, 10], status.Ca!.BandwidthsMHz);
             AtCell serving = status.Cells!.First(c => c.Rat == "LTE" && c.Role == CellRole.Serving);
             Assert.Equal(-81, serving.RsrpDbm);
             Assert.Equal(-9, serving.RsrqDb);
@@ -205,56 +205,56 @@ namespace WwanProbe.Tests
             LteNeighbor neighbor = Assert.Single(status.Neighbors!);
             Assert.Equal(-89, neighbor.RsrpDbm);
             Assert.Equal("B3/1800", neighbor.Band);
-            Assert.Single(status.Cells!, c => c.Rat == "NR");
-            Assert.Single(status.Cells!, c => c.Rat == "UMTS");
+            _ = Assert.Single(status.Cells!, c => c.Rat == "NR");
+            _ = Assert.Single(status.Cells!, c => c.Rat == "UMTS");
             CarrierAggregation ca = FibocomStatus.ParseGtcainfo(At.Response("+GTCAINFO: PCC:103,358,1300,100,2,1,3,2,60", "SCC 1:2,0,101,300,100,50,50,2,1,3,2,55"))!;
-            Assert.Equal(new double?[] { 20, 10 }, ca.BandwidthsMHz);
-            fibocom.Remove("AT+GTCAINFO?");
-            Assert.Equal(new double?[] { 20 }, AtStatusParser.ParseStatus(profile, fibocom).Ca!.BandwidthsMHz);
+            Assert.Equal([20, 10], ca.BandwidthsMHz);
+            _ = fibocom.Remove("AT+GTCAINFO?");
+            Assert.Equal([20], AtStatusParser.ParseStatus(profile, fibocom).Ca!.BandwidthsMHz);
 
             RatConfig rat = AtStatusParser.ParseConfig(profile, At.Responses(("AT+GTACT?", At.Response("+GTACT: 17,6,,101,103,5078,50257,1"))))!;
             Assert.Equal("4G+5G", rat.Allowed);
-            Assert.Equal(new[] { "LTE", "NR" }, rat.AllowedRats);
+            Assert.Equal(["LTE", "NR"], rat.AllowedRats);
             Assert.False(Downgrade.IsLegacyRatAllowed(rat.AllowedRats));
             Assert.Equal("5G", rat.Preferred);
-            Assert.Equal(new[] { 1, 3 }, rat.LteBands);
-            Assert.Equal(new[] { 78, 257 }, rat.NrBands);
-            Assert.Equal(new[] { 1 }, rat.UmtsBands);
-            Assert.Contains("3G", FibocomStatus.ParseGtact(At.Response("+GTACT: 20,6,3,0"))!.Allowed);
+            Assert.Equal([1, 3], rat.LteBands);
+            Assert.Equal([78, 257], rat.NrBands);
+            Assert.Equal([1], rat.UmtsBands);
+            Assert.Contains("3G", FibocomStatus.ParseGtact(At.Response("+GTACT: 20,6,3,0"))!.Allowed, StringComparison.Ordinal);
         }
 
         [Fact]
         public void DowngradeDetectionWithNormalizedRegistrationAndVendorCells()
         {
             AtCell[] cells =
-            {
+            [
                 new AtCell { Rat = Rat.Nr, Role = CellRole.Serving, Channel = 627264 },
                 new AtCell { Rat = Rat.Umts, Role = CellRole.Neighbor, Channel = 10700 },
-            };
-            DowngradeFinding finding = Downgrade.Evaluate(new[] { "LTE" }, 0, cells, "QENG");
+            ];
+            DowngradeFinding finding = Downgrade.Evaluate(["LTE"], 0, cells, "QENG");
             Assert.Equal(DowngradeLevel.Warning, finding.Level);
             Assert.Equal("UMTS neighbor ch:10700 (QENG)", string.Join(';', finding.Reasons));
             List<AtCell> wcdma = QuectelStatus.ParseQengServing(At.Response("+QENG: \"servingcell\",\"NOCONN\",\"WCDMA\",440,10,1234,ABCDEF,10700,300,0,-80,-5,-,-,-,-,-"))!;
-            Assert.Equal(DowngradeLevel.Alert, Downgrade.Evaluate(new[] { "LTE" }, 0, wcdma, "QENG").Level);
-            Assert.Equal(new[] { "UMTS" }, ModemObservation.RatsFromDataClass("Umts, Hsdpa, Hsupa"));
-            Assert.Equal(new[] { "LTE", "NR" }, ModemObservation.RatsFromDataClass("Lte, NewRadioNonStandalone"));
-            Assert.Equal(DowngradeLevel.Alert, Downgrade.Evaluate(new[] { "UMTS" }, 0).Level);
-            Assert.Equal(DowngradeLevel.None, Downgrade.Evaluate(new[] { "UMTS", "LTE" }, 0).Level);
-            Assert.Equal("1 2G/3G serving cell(s) (WinRT)", Downgrade.Evaluate(new[] { "LTE" }, 1).Reasons.Single());
+            Assert.Equal(DowngradeLevel.Alert, Downgrade.Evaluate(["LTE"], 0, wcdma, "QENG").Level);
+            Assert.Equal(["UMTS"], ModemObservation.RatsFromDataClass("Umts, Hsdpa, Hsupa"));
+            Assert.Equal(["LTE", "NR"], ModemObservation.RatsFromDataClass("Lte, NewRadioNonStandalone"));
+            Assert.Equal(DowngradeLevel.Alert, Downgrade.Evaluate(["UMTS"], 0).Level);
+            Assert.Equal(DowngradeLevel.None, Downgrade.Evaluate(["UMTS", "LTE"], 0).Level);
+            Assert.Equal("1 2G/3G serving cell(s) (WinRT)", Downgrade.Evaluate(["LTE"], 1).Reasons.Single());
         }
 
         // libmbim: Intel/Fibocom/Compal raw "<cmd>\r\n"; Quectel QDU UINT32 type + command.
         [Fact]
         public void MbimAtFramingRoundTrip()
         {
-            Assert.Equal(new byte[] { 65, 84, 13, 10 }, MbimAtFraming.ToRequest(AtFraming.Crlf, "AT"));
+            Assert.Equal("AT\r\n"u8.ToArray(), MbimAtFraming.ToRequest(AtFraming.Crlf, "AT"));
             Assert.Equal(new byte[] { 0, 0, 0, 0, 65, 84 }, MbimAtFraming.ToRequest(AtFraming.Qdu, "AT"));
-            byte[] ok = new byte[] { 0, 0, 0, 0 }.Concat(Encoding.ASCII.GetBytes("+QTEMP: 30,28,27\r\n")).Concat(new byte[] { 0, 0 }).ToArray();
+            byte[] ok = [0, 0, 0, 0, .. Encoding.ASCII.GetBytes("+QTEMP: 30,28,27\r\n"), .. new byte[] { 0, 0 }];
             Assert.Equal(30, QuectelStatus.ParseQtemp(MbimAtFraming.FromResponse(AtFraming.Qdu, ok)));
-            byte[] fail = new byte[] { 1, 0, 0, 0 }.Concat(Encoding.ASCII.GetBytes("\r\nOK\r\n")).ToArray();
+            byte[] fail = [1, 0, 0, 0, .. Encoding.ASCII.GetBytes("\r\nOK\r\n")];
             Assert.False(AtResponse.IsOk(MbimAtFraming.FromResponse(AtFraming.Qdu, fail)));
             Assert.Equal("\r\nOK\r\n", MbimAtFraming.FromResponse(AtFraming.Crlf, Encoding.ASCII.GetBytes("\r\nOK\r\n")));
-            Assert.Equal("", MbimAtFraming.FromResponse(AtFraming.Crlf, Array.Empty<byte>()));
+            Assert.Equal("", MbimAtFraming.FromResponse(AtFraming.Crlf, []));
             Assert.Equal("", MbimAtFraming.FromResponse(AtFraming.Crlf, null));
         }
 
@@ -269,7 +269,7 @@ namespace WwanProbe.Tests
                 string result = TaskWait.FirstResult(() => tasks[starts++], timeoutMs, resendAfterMs);
                 return (result, null, starts, sw.ElapsedMilliseconds);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is TimeoutException or InvalidOperationException)
             {
                 return (null, ex.Message, starts, sw.ElapsedMilliseconds);
             }
@@ -280,19 +280,19 @@ namespace WwanProbe.Tests
         [Fact]
         public void WinRtWaitWithOneResend()
         {
-            (string? Result, string? Error, int Starts, long Ms) r = WaitTest(new[] { Task.FromResult("first") }, 1000, 100);
+            (string? Result, string? Error, int Starts, long Ms) r = WaitTest([Task.FromResult("first")], 1000, 100);
             Assert.True(r.Result == "first" && r.Starts == 1, "A completed query is returned without a resend");
-            r = WaitTest(new[] { Pending(), Task.FromResult("resent") }, 5000, 200);
+            r = WaitTest([Pending(), Task.FromResult("resent")], 5000, 200);
             Assert.True(r.Result == "resent" && r.Starts == 2 && r.Ms >= 190 && r.Ms < 2000, $"An unanswered query is sent once more after ResendAfterMs ({r.Ms}ms)");
-            r = WaitTest(new[] { Task.Delay(400, TestContext.Current.CancellationToken).ContinueWith(_ => "slow", TestContext.Current.CancellationToken), Pending() }, 5000, 100);
+            r = WaitTest([Task.Delay(400, TestContext.Current.CancellationToken).ContinueWith(_ => "slow", TestContext.Current.CancellationToken, TaskContinuationOptions.None, TaskScheduler.Default), Pending()], 5000, 100);
             Assert.True(r.Error is null && r.Result == "slow" && r.Starts == 2 && r.Ms >= 350 && r.Ms < 2000, $"A slow first answer after the resend is still taken ({r.Ms}ms)");
-            r = WaitTest(new[] { Pending(), Pending() }, 400, 100);
+            r = WaitTest([Pending(), Pending()], 400, 100);
             Assert.True(r.Error == "WinRT async operation timed out (400ms)" && r.Starts == 2 && r.Ms < 1500, "Two unanswered queries time out after TimeoutMs in total");
-            r = WaitTest(new[] { Pending(), Pending() }, 200);
-            Assert.True(r.Error!.Contains("timed out") && r.Starts == 1, "Without ResendAfterMs nothing is resent (Await)");
-            TaskCompletionSource<string> failed = new TaskCompletionSource<string>();
+            r = WaitTest([Pending(), Pending()], 200);
+            Assert.True(r.Error!.Contains("timed out", StringComparison.Ordinal) && r.Starts == 1, "Without ResendAfterMs nothing is resent (Await)");
+            TaskCompletionSource<string> failed = new();
             failed.SetException(new InvalidOperationException("modem error"));
-            r = WaitTest(new[] { failed.Task, Pending() }, 1000, 100);
+            r = WaitTest([failed.Task, Pending()], 1000, 100);
             Assert.True(r.Error == "modem error" && r.Starts == 1, "A failed query is rethrown, not resent");
         }
 
@@ -300,7 +300,7 @@ namespace WwanProbe.Tests
         [Fact]
         public void AtChannelAndCommandSetDetection()
         {
-            FakeModem modem = new FakeModem();
+            FakeModem modem = new();
             modem.AtHandlers["Intel AT Tunnel"] = _ => null;
             ModemAt at = ModemAt.Initialize(modem, "");
             Assert.True(at.Channel!.Name == "Intel AT Tunnel" && at.Channel.Unconfirmed && at.Profile!.Id == "Intel" && at.Error is null,
@@ -321,7 +321,7 @@ namespace WwanProbe.Tests
             modem.AtHandlers["Fibocom AT"] = c => c is "AT" or "AT+GTCAINFO=?" ? At.Response() : "ERROR\r\n";
             at = ModemAt.Initialize(modem, "");
             Assert.True(at.Channel!.Name == "Fibocom AT" && at.Profile!.Id == "FibocomGt", "Missing Intel service falls through to Fibocom GT");
-            Assert.Single(at.Tried);
+            _ = Assert.Single(at.Tried);
 
             modem = new FakeModem();
             modem.AtHandlers["Fibocom AT"] = _ => null;

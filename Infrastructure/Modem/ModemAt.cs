@@ -3,28 +3,30 @@ namespace WwanProbe.Infrastructure.Modem
     // AT channel and command set found once at startup (a failed detection needs a restart).
     // Channel / Profile are null when unavailable, Error is a short reason for the screen and
     // Tried lists "<channel>: <reason>" per MBIM service that did not answer OK.
-    public sealed record ModemAt(AtChannel? Channel, AtProfile? Profile, string? Error, IReadOnlyList<string> Tried)
+    internal sealed record ModemAt(AtChannel? Channel, AtProfile? Profile, string? Error, IReadOnlyList<string> Tried)
     {
-        public static readonly ModemAt NotInitialized = new ModemAt(null, null, null, Array.Empty<string>());
+        public static readonly ModemAt NotInitialized = new(null, null, null, []);
 
         // atPort ("COM7") uses that serial port instead of the MBIM services.
         public static ModemAt Initialize(IAtSender sender, string? atPort)
         {
             AtChannel? channel = null;
             AtProfile? profile = null;
-            List<string> tried = new List<string>();
+            List<string> tried = [];
             try
             {
                 if (!string.IsNullOrEmpty(atPort))
                 {
                     AtChannel serial = AtChannel.Serial(atPort);
-                    if (!AtResponse.IsOk(AtChannelDetector.Probe(sender, serial, "AT"))) throw new InvalidOperationException($"no AT response on {atPort}");
+                    if (!AtResponse.IsOk(AtChannelDetector.Probe(sender, serial, "AT")))
+                    {
+                        throw new InvalidOperationException($"no AT response on {atPort}");
+                    }
                     channel = serial;
                 }
                 else
                 {
-                    channel = AtChannelDetector.Find(sender, tried);
-                    if (channel is null) throw new InvalidOperationException($"no AT channel ({tried.Count} MBIM services tried)");
+                    channel = AtChannelDetector.Find(sender, tried) ?? throw new InvalidOperationException($"no AT channel ({tried.Count} MBIM services tried)");
                 }
                 // A channel that did not answer "AT" (AtChannelDetector.Find fallback) would not answer the
                 // probes either, so it goes straight to the command set its service implies.
@@ -47,8 +49,9 @@ namespace WwanProbe.Infrastructure.Modem
         // Values WinRT does not provide, read over the AT channel in one session.
         public AtStatus ReadStatus(IAtSender sender)
         {
-            if (Channel is null || Profile is null) throw new InvalidOperationException(Error ?? "AT not initialized");
-            return AtStatusParser.ParseStatus(Profile, sender.SendAt(Channel, Profile.Status));
+            return Channel is null || Profile is null
+                ? throw new InvalidOperationException(Error ?? "AT not initialized")
+                : AtStatusParser.ParseStatus(Profile, sender.SendAt(Channel, Profile.Status));
         }
 
         // RAT / band configuration (does not change while running), or null when unavailable.
@@ -60,7 +63,7 @@ namespace WwanProbe.Infrastructure.Modem
         }
     }
 
-    public static class AtChannelDetector
+    internal static class AtChannelDetector
     {
         // Sends one command for startup probing and returns its response (null = no answer). A timed-out
         // command is sent once more: on the L860-GL the AT Tunnel was seen to drop a response right after
@@ -69,7 +72,7 @@ namespace WwanProbe.Infrastructure.Modem
         {
             for (int attempt = 0; attempt < 2; attempt++)
             {
-                string? r = sender.SendAt(channel, new[] { command }, timeoutMs).Get(command);
+                string? r = sender.SendAt(channel, [command], timeoutMs).Get(command);
                 if (r is not null) return r;
             }
             return null;

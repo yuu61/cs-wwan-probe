@@ -1,20 +1,20 @@
 namespace WwanProbe.Domain
 {
     // LTE cell identity, observation continuity and bounded transition history.
-    public sealed record HandoverCell(string Provider, long CellId, string Band, long? Earfcn, long? Pci, long? Tac, int? RsrpDbm);
+    internal sealed record HandoverCell(string Provider, long CellId, string Band, long? Earfcn, long? Pci, long? Tac, int? RsrpDbm);
 
-    public sealed record HandoverEntry(int Number, string Timestamp, HandoverCell From, HandoverCell To);
+    internal sealed record HandoverEntry(int Number, string Timestamp, HandoverCell From, HandoverCell To);
 
     // Bounded session-local cell-change history. Count includes entries already evicted.
-    public sealed class HandoverLog
+    internal sealed class HandoverLog
     {
         public HandoverLog(int maxEntries = 100)
         {
-            if (maxEntries < 1 || maxEntries > 10000) throw new ArgumentOutOfRangeException(nameof(maxEntries));
+            if (maxEntries is < 1 or > 10000) throw new ArgumentOutOfRangeException(nameof(maxEntries));
             MaxEntries = maxEntries;
         }
 
-        public List<HandoverEntry> Entries { get; } = new List<HandoverEntry>();
+        public List<HandoverEntry> Entries { get; } = [];
         public HandoverCell? Previous { get; set; }
         public int Count { get; set; }
         public int MaxEntries { get; }
@@ -32,7 +32,7 @@ namespace WwanProbe.Domain
                 return;
             }
             // Copy values so future snapshots cannot mutate previously recorded events.
-            HandoverCell current = new HandoverCell(cell.Provider, cellId, cell.Band, cell.Earfcn, cell.Pci, cell.Tac, cell.RsrpDbm);
+            HandoverCell current = new(cell.Provider, cellId, cell.Band, cell.Earfcn, cell.Pci, cell.Tac, cell.RsrpDbm);
             HandoverCell? previous = Previous;
             if (previous is not null &&
                 (!string.Equals(previous.Provider, current.Provider, StringComparison.OrdinalIgnoreCase) || previous.CellId != current.CellId))

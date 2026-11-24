@@ -4,9 +4,9 @@ using WwanProbe.Infrastructure.Gnss;
 namespace WwanProbe.Presentation
 {
     // GPS / GNSS section on the main screen and the satellite list ([s] view).
-    public static class GnssSection
+    internal static class GnssSection
     {
-        private static readonly Dictionary<string, ConsoleColor> SystemColors = new Dictionary<string, ConsoleColor>(StringComparer.OrdinalIgnoreCase)
+        private static readonly Dictionary<string, ConsoleColor> SystemColors = new(StringComparer.OrdinalIgnoreCase)
         {
             ["GPS"] = ConsoleColor.Green,
             ["QZSS"] = ConsoleColor.White,
@@ -25,6 +25,9 @@ namespace WwanProbe.Presentation
                 case "Starting": return "Starting (waiting for the elevated NMEA helper)";
                 case "Stale": return "Stale (the NMEA helper stopped updating)";
                 case "Unavailable": return $"Unavailable ({satellites.Error})";
+                default:
+                    // Receiving: the counts below.
+                    break;
             }
             if (!satellites.NmeaReceived) return "waiting for NMEA from the GNSS driver";
             string systems = string.Join(", ", satellites.Systems.Select(s => string.Format(CultureInfo.InvariantCulture, "{0} {1}", s.System, s.InView)));
@@ -58,8 +61,7 @@ namespace WwanProbe.Presentation
                 lines.Add(new FrameLine(string.Format(inv, " Alt: {0}   Speed: {1}   Heading: {2}",
                     MonitorFrame.Optional(gps.AltitudeM, "{0:0.0} m"), MonitorFrame.Optional(gps.SpeedMps, "{0:0.0} m/s"),
                     MonitorFrame.Optional(gps.HeadingDeg, "{0:0.0} deg"))));
-                lines.Add(new FrameLine(string.Format(inv, " HDOP: {0}   PDOP: {1}   VDOP: {2}", MonitorFrame.Optional(gps.Hdop, "{0:0.0}"),
-                    MonitorFrame.Optional(gps.Pdop, "{0:0.0}"), MonitorFrame.Optional(gps.Vdop, "{0:0.0}"))));
+                lines.Add(new FrameLine(string.Format(inv, " HDOP: {0}   PDOP: {1}   VDOP: {2}", Dop(gps.Hdop), Dop(gps.Pdop), Dop(gps.Vdop))));
                 lines.Add(new FrameLine($" Source: Satellite   Fix UTC: {gps.Timestamp}", ConsoleColor.DarkGray));
             }
             else if (gps is not null)
@@ -80,6 +82,9 @@ namespace WwanProbe.Presentation
                 if (satellites.Status == "Receiving") AddNmeaFixLines(lines, satellites.Fix);
             }
         }
+
+        // Dilution of precision with one decimal, or n/a.
+        private static string Dop(double? value) => value?.ToString("0.0", CultureInfo.InvariantCulture) ?? "n/a";
 
         // Satellite list (the [s] view): one row per satellite and signal, colored by constellation.
         // satellites = null means -Nmea is off (enabled = false) or no sample has completed yet.

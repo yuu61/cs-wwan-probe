@@ -4,11 +4,13 @@ using WwanProbe.Domain;
 namespace WwanProbe.Presentation
 {
     // Handover history section (compact on the main screen, paged in the [h] view).
-    public static class HandoverSection
+    internal static class HandoverSection
     {
-        public static string FormatCell(HandoverCell cell) =>
-            string.Format(CultureInfo.InvariantCulture, "{0} PCI:{1} PLMN:{2} EARFCN:{3} TAC:{4} RSRP:{5}",
+        public static string FormatCell(HandoverCell cell)
+        {
+            return string.Format(CultureInfo.InvariantCulture, "{0} PCI:{1} PLMN:{2} EARFCN:{3} TAC:{4} RSRP:{5}",
                 cell.Band, cell.Pci, cell.Provider, cell.Earfcn, cell.Tac, MonitorFrame.Optional(cell.RsrpDbm, "{0}dBm"));
+        }
 
         // Compact recent changes on the main screen; a separate view keeps the retained
         // history accessible even when charts or a small console would clip the body.

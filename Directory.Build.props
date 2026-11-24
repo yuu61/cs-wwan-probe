@@ -1,0 +1,11 @@
+<Project>
+
+  <!-- Strict analysis: every built-in analyzer (CA*) and code-style (IDE*) rule is on and fails the build. -->
+  <PropertyGroup>
+    <AnalysisLevel>latest-all</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+</Project>

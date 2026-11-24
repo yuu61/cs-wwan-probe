@@ -10,12 +10,12 @@ namespace WwanProbe.Tests
 {
     // NMEA satellite parsing, helper state, rendering and keys.
     // Sentences are real L860-GL output (2026-09-24, 2026-09-25, 2026-09-28) unless noted; coordinates are never involved.
-    public class NmeaTests
+    public partial class NmeaTests
     {
         private static readonly DateTimeOffset Now = DateTimeOffset.Parse("2026-09-24T12:00:00Z", CultureInfo.InvariantCulture);
 
         private static readonly string[] Capture =
-        {
+        [
             "$GPGSV,3,1,12,02,87,163,17,08,60,031,32,01,59,199,,07,46,255,16,1*6B",
             "$GPGSV,3,2,12,30,29,298,,27,28,066,21,16,20,121,,10,16,053,19,1*6E",
             "$GPGSV,3,3,12,14,14,311,,03,02,172,,17,02,265,,23,00,029,,1*6E",
@@ -24,13 +24,13 @@ namespace WwanProbe.Tests
             "$GPGSA,A,3,02,08,07,27,10,,,,,,,,2.93,2.01,2.13*00",
             "$GNGSA,A,3,02,08,07,27,10,,,,,,,,2.93,2.01,2.13,1*03",
             "$GNGSA,A,3,75,84,,,,,,,,,,,2.93,2.01,2.13,2*07",
-        };
+        ];
 
         private static string Key(NmeaSatellite s) => $"{s.System}:{s.Id}";
 
         private static NmeaSatelliteState State(IEnumerable<string> sentences, DateTimeOffset now)
         {
-            NmeaSatelliteState state = new NmeaSatelliteState();
+            NmeaSatelliteState state = new();
             foreach (string s in sentences) state.Add(s, now);
             return state;
         }
@@ -49,11 +49,11 @@ namespace WwanProbe.Tests
         public void StreamFramingAndChecksum()
         {
             string stream = string.Join("\r\n", Capture) + "\r\n" + "$GPGSV,1,1,00,1*00" + "\r\nnoise\r\n" + "$GPGGA,1234";
-            List<string> sentences = new List<string>();
+            List<string> sentences = [];
             string rest = "";
             for (int i = 0; i < stream.Length; i += 37)
             {
-                NmeaSplit split = Nmea.Split(rest + stream.Substring(i, Math.Min(37, stream.Length - i)));
+                NmeaSplit split = Nmea.Split(string.Concat(rest, stream.AsSpan(i, Math.Min(37, stream.Length - i))));
                 sentences.AddRange(split.Sentences);
                 rest = split.Rest;
             }
@@ -70,20 +70,20 @@ namespace WwanProbe.Tests
             Assert.True(report.Satellites.Count == 18 && report.UsedCount == 7, "GPGSA and GNGSA were double counted or satellites were lost.");
             NmeaSatellite gps2 = report.Satellites.Single(s => s.System == "GPS" && s.Id == 2);
             Assert.True(gps2.ElevationDeg == 87 && gps2.AzimuthDeg == 163 && gps2.SnrDbHz == 17 && gps2.Used && gps2.Signal == "1", "GSV fields were misread.");
-            List<NmeaSatellite> glonass = report.Satellites.Where(s => s.System == "GLONASS").ToList();
+            List<NmeaSatellite> glonass = [.. report.Satellites.Where(s => s.System == "GLONASS")];
             Assert.True(glonass.Count == 6 && string.Join(',', glonass.Where(s => s.Used).Select(s => s.Id)) == "75,84", "GLONASS usage did not match GNGSA system 2.");
             Assert.Null(glonass.Single(s => s.Id == 74).SnrDbHz);
-            List<string> order = report.Satellites.Select(Key).ToList();
+            List<string> order = [.. report.Satellites.Select(Key)];
             Assert.Equal("GPS:8,GLONASS:75,GLONASS:84,GPS:27,GPS:10,GPS:2,GPS:7,GLONASS:74,GPS:1", string.Join(',', order.Take(9)));
             Assert.Equal("GPS:3,GPS:17,GPS:23", string.Join(',', order.TakeLast(3)));
 
             // A used satellite precedes a stronger unused one; equal SNR and elevation fall back to constellation order.
-            NmeaSatelliteState sortState = State(new[]
-            {
+            NmeaSatelliteState sortState = State(
+            [
                 "$GPGSV,1,1,03,05,10,100,40,06,20,200,30,07,30,300,,1*00",
                 "$GLGSV,1,1,01,70,10,100,40,1*00",
                 "$GPGSA,A,3,06" + new string(',', 11) + ",2.0,1.0,1.0,1*00",
-            }, Now);
+            ], Now);
             Assert.Equal("GPS:6,GPS:5,GLONASS:70,GPS:7", string.Join(',', sortState.Report(Now).Satellites.Select(Key)));
 
             // An incomplete or out-of-order cycle never replaces the last complete one.
@@ -109,7 +109,7 @@ namespace WwanProbe.Tests
         public void GsaSystemIds4And5SwappedByTheReceiver()
         {
             string[] swapCapture =
-            {
+            [
                 "$GPGSV,3,1,11,20,75,295,24,05,64,004,24,21,48,070,16,15,40,258,,1*6B",
                 "$GPGSV,3,2,11,11,38,151,25,30,36,063,17,29,26,270,15,18,17,319,14,1*66",
                 "$GPGSV,3,3,11,24,10,196,,07,09,038,17,06,05,146,,1*5E",
@@ -124,10 +124,10 @@ namespace WwanProbe.Tests
                 "$GNGSA,A,3,69,,,,,,,,,,,,3.31,2.19,2.48,2*08",
                 "$GNGSA,A,3,195,,,,,,,,,,,,3.31,2.19,2.48,4*3C",
                 "$GNGSA,A,3,21,,,,,,,,,,,,3.31,2.19,2.48,5*03",
-            };
+            ];
             NmeaSatelliteState state = State(swapCapture, Now);
             NmeaReport report = state.Report(Now);
-            List<string> used = report.Satellites.Where(s => s.Used).Select(Key).OrderBy(k => k, StringComparer.OrdinalIgnoreCase).ToList();
+            List<string> used = [.. report.Satellites.Where(s => s.Used).Select(Key).OrderBy(k => k, StringComparer.OrdinalIgnoreCase)];
             Assert.Equal("BeiDou:21,GLONASS:69,GPS:11,GPS:20,GPS:30,GPS:5,GPS:7,QZSS:195", string.Join(',', used));
             Assert.Equal(used.Count, report.UsedCount);
             // QZSS 195 also listed by GPGSA (QZSS by its ID range) counts once.
@@ -135,40 +135,40 @@ namespace WwanProbe.Tests
             Assert.Equal(8, state.Report(Now).UsedCount);
 
             // A low BeiDou ID under system 5 is BeiDou when that receiver numbers QZSS 193-202.
-            NmeaSatelliteState low = State(new[]
-            {
+            NmeaSatelliteState low = State(
+            [
                 "$GBGSV,1,1,01,07,13,181,21,1*00", "$GQGSV,1,1,01,194,09,182,20,1*00", "$GNGSA,A,3,07" + new string(',', 11) + ",2.0,1.0,1.0,5*00",
-            }, Now);
+            ], Now);
             Assert.Equal("BeiDou:7", UsedKeys(low.Report(Now)));
             // NMEA 4.11 numbering (QZSS 1-10): the nominal system wins when both satellites are in view.
-            NmeaSatelliteState strict = State(new[]
-            {
+            NmeaSatelliteState strict = State(
+            [
                 "$GBGSV,1,1,01,02,40,100,30,1*00", "$GQGSV,1,1,01,02,60,200,30,1*00", "$GNGSA,A,3,02" + new string(',', 11) + ",2.0,1.0,1.0,5*00",
-            }, Now);
+            ], Now);
             Assert.Equal("QZSS:2", UsedKeys(strict.Report(Now)));
         }
 
         // Fix state from GGA / RMC / GSA: real L860-GL field values (2026-09-25) with dummy coordinates.
-        public static NmeaFix GoodFix()
+        internal static NmeaFix GoodFix()
         {
-            NmeaSatelliteState state = State(new[]
-            {
+            NmeaSatelliteState state = State(
+            [
                 Sentence("GNGGA,205350.033,3500.0000,N,13900.0000,E,1,13,0.82,14.600,M,39.432,M,,"),
                 Sentence("GNRMC,205349.083,A,3500.0000,N,13900.0000,E,26.136,300.9,240926,,,A,V"),
                 Sentence("GNGSA,A,3,65,88,66,81,,,,,,,,,1.36,0.79,1.11,2"),
-            }, Now);
+            ], Now);
             return state.Report(Now).Fix;
         }
 
         [Fact]
         public void FixStateGnPreferenceAgingAndNoCoordinates()
         {
-            NmeaSatelliteState state = State(new[]
-            {
+            NmeaSatelliteState state = State(
+            [
                 Sentence("GNGGA,205350.033,3500.0000,N,13900.0000,E,1,13,0.82,14.600,M,39.432,M,,"),
                 Sentence("GNRMC,205349.083,A,3500.0000,N,13900.0000,E,26.136,300.9,240926,,,A,V"),
                 Sentence("GNGSA,A,3,65,88,66,81,,,,,,,,,1.36,0.79,1.11,2"),
-            }, Now);
+            ], Now);
             NmeaFix fix = state.Report(Now).Fix;
             Assert.True(fix.Dimension == "3D" && fix.Quality == "GPS" && fix.SatellitesUsed == 13, "GSA / GGA fix fields were misread.");
             Assert.True(fix.AltitudeMslM == 14.6 && fix.GeoidSeparationM == 39.432 && fix.Valid == true && fix.Mode == "Autonomous", "GGA altitude or RMC status was misread.");
@@ -190,22 +190,22 @@ namespace WwanProbe.Tests
         {
             NmeaReport report = State(Capture, Now).Report(Now);
             string directory = Path.Combine(Path.GetTempPath(), $"wwan-nmea-test-{Guid.NewGuid():N}");
-            Directory.CreateDirectory(directory);
+            _ = Directory.CreateDirectory(directory);
             try
             {
                 string path = Path.Combine(directory, "state.json");
                 Assert.Null(NmeaStateFile.Read(path));
-                NmeaHelperState published = new NmeaHelperState
+                NmeaHelperState published = new()
                 {
                     Status = "Receiving",
                     UpdatedUnixMs = Now.ToUnixTimeMilliseconds(),
                     NmeaUnixMs = Now.ToUnixTimeMilliseconds(),
-                    Satellites = report.Satellites.ToList(),
+                    Satellites = [.. report.Satellites],
                     UsedCount = report.UsedCount,
                     Fix = GoodFix(),
                 };
                 Assert.True(NmeaStateFile.Write(path, published), "State was not written.");
-                using (FileStream held = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                using (FileStream held = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
                 {
                     Assert.False(NmeaStateFile.Write(path, published), "A replace during a read did not report a retry.");
                 }
@@ -225,30 +225,31 @@ namespace WwanProbe.Tests
             Assert.True(observation.Systems[0].InView == 12 && observation.Systems[1].Used == 2, "Per-constellation counts are wrong.");
             Assert.True(observation.Fix!.Dimension == "3D" && observation.Fix.AltitudeMslM == 14.6 && observation.Fix.Valid == true, "The fix state did not survive the state file.");
 
-            NmeaHelperState receiving = new NmeaHelperState { Status = "Receiving", UpdatedUnixMs = Now.ToUnixTimeMilliseconds() };
+            NmeaHelperState receiving = new() { Status = "Receiving", UpdatedUnixMs = Now.ToUnixTimeMilliseconds() };
             Assert.Equal("Starting", NmeaObservation.FromState(null, now: Now).Status);
             Assert.Equal("Stale", NmeaObservation.FromState(receiving, now: Now.AddSeconds(11)).Status);
             Assert.False(NmeaObservation.FromState(receiving, now: Now).NmeaReceived);
             NmeaObservation failed = NmeaObservation.FromState(new NmeaHelperState { Status = "Error", Error = "No GNSS device interface found." }, helperExited: true, now: Now);
             Assert.True(failed.Status == "Unavailable" && failed.Error == "No GNSS device interface found.", "The helper error was not shown.");
             NmeaObservation crashed = NmeaObservation.FromState(receiving, helperExited: true, exitCode: 1, now: Now);
-            Assert.True(crashed.Status == "Unavailable" && crashed.Error!.Contains("code 1"), "A crashed helper looked alive.");
+            Assert.True(crashed.Status == "Unavailable" && crashed.Error!.Contains("code 1", StringComparison.Ordinal), "A crashed helper looked alive.");
             NmeaObservation declined = new NmeaReceiver(null, null, "NMEA helper not started: The operation was canceled by the user.").Observe();
-            Assert.True(declined.Status == "Unavailable" && declined.Error!.Contains("canceled"), "A declined UAC prompt was not shown.");
+            Assert.True(declined.Status == "Unavailable" && declined.Error!.Contains("canceled", StringComparison.Ordinal), "A declined UAC prompt was not shown.");
 
-            FakeModem modem = new FakeModem();
-            FakeTraffic traffic = new FakeTraffic();
+            FakeModem modem = new();
+            FakeTraffic traffic = new();
             LteSnapshot snapshot = LteSnapshot.Take(modem, null, traffic, null, new NmeaReceiver(null, null, "declined"));
             Assert.True(snapshot.Error is null && snapshot.Satellites!.Status == "Unavailable", "An NMEA failure invalidated LTE.");
             // A helper handle that cannot be queried (unstarted Process) must neither fail the LTE sample nor the shutdown.
-            snapshot = LteSnapshot.Take(modem, null, traffic, null, new NmeaReceiver(new Process(), null, null));
+            using Process unstarted = new();
+            snapshot = LteSnapshot.Take(modem, null, traffic, null, new NmeaReceiver(unstarted, null, null));
             Assert.True(snapshot.Error is null && snapshot.Satellites!.Status == "Unavailable", "A broken receiver failed the LTE sample.");
             Assert.Null(LteSnapshot.Take(modem, null, traffic, null, null).Satellites);
             string directory = Path.Combine(Path.GetTempPath(), $"wwan-nmea-test-{Guid.NewGuid():N}");
-            Directory.CreateDirectory(directory);
+            _ = Directory.CreateDirectory(directory);
             try
             {
-                new NmeaReceiver(new Process(), directory, null).Stop(10);
+                new NmeaReceiver(unstarted, directory, null).Stop(10);
                 Assert.True(File.Exists(Path.Combine(directory, "stop")), "The stop request was not left for the helper.");
             }
             finally { Directory.Delete(directory, true); }
@@ -264,39 +265,39 @@ namespace WwanProbe.Tests
             snapshot.Satellites = PublishedObservation();
             session.Snapshot = snapshot;
             session.Iteration = 1;
-            MonitorView view = new MonitorView { Unicode = false, LastHeight = 30 };
+            MonitorView view = new() { Unicode = false, LastHeight = 30 };
             Frame frame = MonitorFrame.Build(session, view, 100);
             string text = Fixtures.Text(frame);
-            Assert.Contains("Satellites: 18 in view (GPS 12, GLONASS 6), 7 used  [s]", text);
-            Assert.Contains("[s] Satellites", frame.Footer.Text);
-            Assert.Contains("Fix (NMEA): 3D   Quality: GPS   Mode: Autonomous (valid)   Sats used: 13", text);
-            Assert.Contains("Altitude MSL: 14.6 m   Geoid separation: 39.4 m", text);
+            Assert.Contains("Satellites: 18 in view (GPS 12, GLONASS 6), 7 used  [s]", text, StringComparison.Ordinal);
+            Assert.Contains("[s] Satellites", frame.Footer.Text, StringComparison.Ordinal);
+            Assert.Contains("Fix (NMEA): 3D   Quality: GPS   Mode: Autonomous (valid)   Sats used: 13", text, StringComparison.Ordinal);
+            Assert.Contains("Altitude MSL: 14.6 m   Geoid separation: 39.4 m", text, StringComparison.Ordinal);
 
             view.SatelliteVisible = true;
             frame = MonitorFrame.Build(session, view, 100);
-            List<FrameLine> rows = frame.Body.Where(l => Regex.IsMatch(l.Text, "^ (GPS|GLONASS) ")).ToList();
-            Assert.True(rows.Count == 18 && frame.Footer.Text.Contains("[s] Monitor"), "The satellite list is incomplete.");
+            List<FrameLine> rows = [.. frame.Body.Where(l => GpsOrGlonassRow().IsMatch(l.Text))];
+            Assert.True(rows.Count == 18 && frame.Footer.Text.Contains("[s] Monitor", StringComparison.Ordinal), "The satellite list is incomplete.");
             Assert.True(rows.Count(r => r.Color == ConsoleColor.Green) == 12 && rows.Count(r => r.Color == ConsoleColor.Magenta) == 6, "Constellations are not colored.");
             Assert.Matches("^ GPS +8 +1 +60 +31 +32 +yes ", rows[0].Text);
-            Assert.Matches(@"^ GPS +1 +1 +59 +199 +n/a +\[ +not tracked +\]", rows.Single(r => Regex.IsMatch(r.Text, "^ GPS +1 ")).Text);
-            Assert.Contains(" yes ", rows.Single(r => Regex.IsMatch(r.Text, "^ GPS +2 ")).Text);
+            Assert.Matches(@"^ GPS +1 +1 +59 +199 +n/a +\[ +not tracked +\]", rows.Single(r => GpsRowId(r) == "1").Text);
+            Assert.Contains(" yes ", rows.Single(r => GpsRowId(r) == "2").Text, StringComparison.Ordinal);
             view.LastHeight = 12;
             view.SatelliteOffset = 99;
             frame = MonitorFrame.Build(session, view, 100);
-            Assert.True(view.SatelliteOffset == 16 && frame.Body.Count <= 12 && Fixtures.Text(frame).Contains("Rows 17-18 / 18"), "Satellite scrolling does not fit the screen.");
+            Assert.True(view.SatelliteOffset == 16 && frame.Body.Count <= 12 && Fixtures.Text(frame).Contains("Rows 17-18 / 18", StringComparison.Ordinal), "Satellite scrolling does not fit the screen.");
             session.NmeaReceiver = null;
             snapshot.Satellites = null;
-            Assert.Contains("start cs-wwan-probe with -Nmea", Fixtures.Text(MonitorFrame.Build(session, view, 100)));
+            Assert.Contains("start cs-wwan-probe with -Nmea", Fixtures.Text(MonitorFrame.Build(session, view, 100)), StringComparison.Ordinal);
             view.SatelliteVisible = false;
             frame = MonitorFrame.Build(session, view, 100);
-            Assert.DoesNotContain("Satellites:", Fixtures.Text(frame));
-            Assert.DoesNotContain("[s]", frame.Footer.Text);
+            Assert.DoesNotContain("Satellites:", Fixtures.Text(frame), StringComparison.Ordinal);
+            Assert.DoesNotContain("[s]", frame.Footer.Text, StringComparison.Ordinal);
         }
 
         [Fact]
         public void STogglesTheSatelliteListExclusiveWithH()
         {
-            MonitorView view = new MonitorView { HandoverVisible = true, HandoverOffset = 2 };
+            MonitorView view = new() { HandoverVisible = true, HandoverOffset = 2 };
             TuiMonitor.ReadInput(view, Keys.From(Keys.Of(ConsoleKey.S, ConsoleKey.DownArrow, ConsoleKey.DownArrow, ConsoleKey.UpArrow)));
             Assert.True(view.SatelliteVisible && !view.HandoverVisible && view.SatelliteOffset == 1 && view.ChartRows == 2, "s did not open a scrollable list.");
             TuiMonitor.ReadInput(view, Keys.From(Keys.Of(ConsoleKey.H)));
@@ -304,5 +305,18 @@ namespace WwanProbe.Tests
             TuiMonitor.ReadInput(view, Keys.From(Keys.Of(ConsoleKey.S, ConsoleKey.S)));
             Assert.True(!view.SatelliteVisible && !view.HandoverVisible && view.SatelliteOffset == 0, "s did not return to the monitor.");
         }
+
+        [GeneratedRegex("^ (GPS|GLONASS) ")]
+        private static partial Regex GpsOrGlonassRow();
+
+        // Satellite id of a GPS row in the satellite list, or null for other rows.
+        private static string? GpsRowId(FrameLine row)
+        {
+            Match m = GpsRow().Match(row.Text);
+            return m.Success ? m.Groups[1].Value : null;
+        }
+
+        [GeneratedRegex(@"^ GPS +(\d+) ")]
+        private static partial Regex GpsRow();
     }
 }

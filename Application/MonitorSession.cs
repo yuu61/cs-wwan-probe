@@ -7,7 +7,7 @@ namespace WwanProbe.Application
 {
     // Interval = seconds between samples (0 = back to back), Count = samples (0 = infinite),
     // CsvPath = CSV log ("" = none), AtPort = "COMx" or "" (MBIM AT services).
-    public sealed class MonitorConfig
+    internal sealed class MonitorConfig
     {
         public int Interval { get; set; }
         public int Count { get; set; }
@@ -17,15 +17,15 @@ namespace WwanProbe.Application
 
     // Signal series, all the same length (NaN = missing sample):
     //   Rsrp (dBm), Rsrq (dB), Rssnr (dB), RxKB / TxKB (KB/s), TempC (C)
-    public sealed class SignalHistory
+    internal sealed class SignalHistory
     {
-        public static readonly IReadOnlyList<string> Names = new[] { "Rsrp", "Rsrq", "Rssnr", "RxKB", "TxKB", "TempC" };
+        public static readonly IReadOnlyList<string> Names = ["Rsrp", "Rsrq", "Rssnr", "RxKB", "TxKB", "TempC"];
 
-        private readonly Dictionary<string, List<double>> series = new Dictionary<string, List<double>>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, List<double>> series = new(StringComparer.OrdinalIgnoreCase);
 
         public SignalHistory()
         {
-            foreach (string name in Names) series[name] = new List<double>();
+            foreach (string name in Names) series[name] = [];
         }
 
         public List<double> this[string name] => series[name];
@@ -40,13 +40,13 @@ namespace WwanProbe.Application
     }
 
     // 2G/3G findings seen so far, kept after they disappear so a brief downgrade is not missed on screen.
-    public sealed class DowngradeLog
+    internal sealed class DowngradeLog
     {
         public int AlertCount { get; set; }
         public int WarningCount { get; set; }
         public string? Last { get; set; }
         public DowngradeLevel? LastLevel { get; set; }
-        public IReadOnlyList<string> LastReasons { get; set; } = Array.Empty<string>();
+        public IReadOnlyList<string> LastReasons { get; set; } = [];
 
         public void Add(LteSnapshot snapshot)
         {
@@ -62,7 +62,7 @@ namespace WwanProbe.Application
 
     // Monitoring session use case (sample -> history -> CSV), UI independent.
     // Statistics (History, HandoverLog, DowngradeLog) can be cleared with ResetStatistics.
-    public sealed class MonitorSession
+    internal sealed class MonitorSession
     {
         public IModemDevice? Modem { get; set; }
         public ITrafficCounter? Traffic { get; set; }
@@ -130,7 +130,7 @@ namespace WwanProbe.Application
         private void AddSignalHistory(LteSnapshot snapshot)
         {
             ServingCell? cell = snapshot.PrimaryCell;
-            Dictionary<string, double?> sample = new Dictionary<string, double?>(StringComparer.OrdinalIgnoreCase)
+            Dictionary<string, double?> sample = new(StringComparer.OrdinalIgnoreCase)
             {
                 ["Rsrp"] = cell?.RsrpDbm,
                 ["Rsrq"] = cell?.RsrqDb,
@@ -150,11 +150,9 @@ namespace WwanProbe.Application
 
     // One reusable background worker for blocking modem/counter reads.
     // Only completed snapshots cross back to the UI; session/history/CSV stay on its thread.
-    public sealed class MonitorSampler
+    internal sealed class MonitorSampler(Func<LteSnapshot> sample)
     {
-        private readonly Func<LteSnapshot> sample;
-
-        public MonitorSampler(Func<LteSnapshot> sample) => this.sample = sample;
+        private readonly Func<LteSnapshot> sample = sample;
 
         public Task<LteSnapshot>? Pending { get; private set; }
 

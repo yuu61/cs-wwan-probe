@@ -1,0 +1,20 @@
+<Project>
+
+  <!--
+    Inline suppressions are not allowed: #pragma warning disable, [SuppressMessage] and #nullable disable
+    fail the build. An unavoidable suppression goes to GlobalSuppressions.cs (with a Justification), a
+    rule scoped to some files goes to .editorconfig.
+  -->
+  <Target Name="ForbidInlineSuppressions" BeforeTargets="CoreCompile">
+    <ItemGroup>
+      <_SuppressionCheck Include="@(Compile)"
+                         Condition="'%(Filename)%(Extension)' != 'GlobalSuppressions.cs' and !$([System.String]::Copy('%(FullPath)').StartsWith('$(MSBuildProjectDirectory)\obj\'))" />
+      <_InlineSuppression Include="@(_SuppressionCheck)"
+                          Condition="$([System.Text.RegularExpressions.Regex]::IsMatch($([System.IO.File]::ReadAllText('%(FullPath)')), '#\s*pragma\s+warning\s+disable|SuppressMessage|#\s*nullable\s+disable'))" />
+    </ItemGroup>
+    <Error Condition="'@(_InlineSuppression)' != ''"
+           File="%(_InlineSuppression.FullPath)"
+           Text="Inline suppression is not allowed: fix the code, or move an unavoidable suppression to GlobalSuppressions.cs / .editorconfig." />
+  </Target>
+
+</Project>
