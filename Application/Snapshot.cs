@@ -74,9 +74,10 @@ namespace WwanProbe.Application
         public NmeaObservation? Satellites { get; set; }
         public DowngradeFinding? Downgrade { get; set; }
 
-        public static LteSnapshot Take(IModemDevice modem, ModemAt? at, ITrafficCounter traffic, GpsSource? gps, NmeaReceiver? nmea)
+        public static LteSnapshot Take(IModemDevice modem, ModemAt? at, ITrafficCounter traffic, GpsSource? gps, NmeaReceiver? nmea,
+            AtSessionTimeout? atTimeout = null)
         {
-            ModemObservation o = ModemObservation.Observe(modem, at, traffic);
+            ModemObservation o = ModemObservation.Observe(modem, at, traffic, atTimeout);
             List<ServingCell> serving = [.. o.Serving.Select(c => c with { Quality = SignalQuality.FromRsrp(c.RsrpDbm) })];
             LteSnapshot snapshot = new()
             {

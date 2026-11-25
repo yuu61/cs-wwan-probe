@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO.Ports;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -81,7 +82,6 @@ namespace WwanProbe.Infrastructure.Modem
     // Same contract as IAtSender over a COM port (opened for this call only).
     internal static partial class SerialAt
     {
-
         public static IReadOnlyDictionary<string, string?> Send(string portName, IReadOnlyList<string> commands, int timeoutMs)
         {
             Dictionary<string, string?> responses = new(StringComparer.OrdinalIgnoreCase);
@@ -89,20 +89,23 @@ namespace WwanProbe.Infrastructure.Modem
             using SerialPort port = new(portName, 115200)
             {
                 NewLine = "\r\n",
-                ReadTimeout = 100,
                 // USB AT ports may ignore input until DTR is asserted (fibocom-connect-fm350 sets it for the FM350 "MD AT" port).
                 DtrEnable = true,
             };
             port.Open();
             port.DiscardInBuffer();
+            TimeSpan timeout = TimeSpan.FromMilliseconds(timeoutMs);
             foreach (string cmd in commands)
             {
                 port.Write(cmd + "\r");
                 StringBuilder text = new();
-                DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+                long sent = Stopwatch.GetTimestamp();
                 bool done = false;
-                while (!done && DateTime.UtcNow < deadline)
+                // Each read waits for a line until the deadline; a read that ends early without one is
+                // checked against the deadline again, so the command gets exactly timeoutMs.
+                for (TimeSpan left = timeout; !done && left > TimeSpan.Zero; left = timeout - Stopwatch.GetElapsedTime(sent))
                 {
+                    port.ReadTimeout = ReadTimeoutMs(left);
                     string line;
                     try { line = port.ReadLine(); }
                     catch (TimeoutException) { continue; }
@@ -114,6 +117,10 @@ namespace WwanProbe.Infrastructure.Modem
             }
             return responses;
         }
+
+        // SerialPort.ReadTimeout for the time left until the deadline: whole milliseconds rounded up, at
+        // least 1 (0 would not wait, -1 would wait forever) and at most int.MaxValue.
+        public static int ReadTimeoutMs(TimeSpan left) => (int)Math.Clamp(Math.Ceiling(left.TotalMilliseconds), 1, int.MaxValue);
 
         [GeneratedRegex(@"^(OK|ERROR|\+CME ERROR:.*|\+CMS ERROR:.*)\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
         private static partial Regex FinalResult();

@@ -65,6 +65,8 @@ MBIM の仕様 ([MB base stations information query support](https://learn.micro
 - Intel AT Tunnel だけは、セッションが開けたのに `AT` に `OK` が返らなかった (応答が落ちた・空だった) 場合も、
   ほかの経路で `OK` が返らなければこの経路を使います (`AtChannelDetector.Find`)。このときはプローブを送らずに Intel のコマンドセットを使います。
   プロファイル導入前と同じく、起動直後に応答が落ちても、以降の毎回の取得で値が取れるようにするためです。
+- 毎回の取得で AT がまったく応答しない回が 3 回続いたら、以後の待ち時間を 3 秒から 1 秒に短くします (10 回に 1 回は 3 秒。応答があれば 3 秒に戻します)。
+  AT はその間も毎回送るので、応答が戻れば次の取得から値が取れます ([neighbor-cells.md](neighbor-cells.md) の 5.)。
 - AT の経路がないモデムでは、各 MBIM サービスを 1.5 秒のタイムアウト (と 1 回の再送) で順に試すため、起動に数秒かかることがあります。
   画面には `AT: unavailable (no AT channel (4 MBIM services tried))` と表示し、各サービスの失敗理由は `Summary.At.Tried` に残します。
 

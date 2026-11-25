@@ -73,8 +73,9 @@ namespace WwanProbe.Infrastructure.Modem
             return neighbors.Count == 0 ? null : neighbors;
         }
 
-        // at: the startup AT detection; null skips the AT values.
-        public static ModemObservation Observe(IModemDevice modem, ModemAt? at, ITrafficCounter traffic)
+        // at: the startup AT detection; null skips the AT values. atTimeout: the AT wait across samples
+        // (null = the IAtSender default every time).
+        public static ModemObservation Observe(IModemDevice modem, ModemAt? at, ITrafficCounter traffic, AtSessionTimeout? atTimeout = null)
         {
             ModemObservation o = new()
             {
@@ -116,7 +117,7 @@ namespace WwanProbe.Infrastructure.Modem
                 // WinRT lacks temperature, SINR and CA info (and neighbors on the L860-GL).
                 try
                 {
-                    AtStatus status = (at ?? ModemAt.NotInitialized).ReadStatus(modem);
+                    AtStatus status = (at ?? ModemAt.NotInitialized).ReadStatus(modem, atTimeout);
                     o.Neighbors = status.Neighbors;
                     o.TempC = status.TempC;
                     o.Rssnr = status.Rssnr;

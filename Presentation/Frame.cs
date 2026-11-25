@@ -152,7 +152,9 @@ namespace WwanProbe.Presentation
             // Title bar
             string status = view.Done ? "DONE" : view.Paused ? "PAUSED" : view.Fetching ? "UPDATING" : "RUNNING";
             string countStr = config.Count == 0 ? "" : Invariant($"/{config.Count}");
-            string right = Invariant($"#{session.Iteration}{countStr}  [{status}]");
+            // -BatteryInterval while Windows saves power: the interval in force (never shown without the option).
+            string saver = session.PowerSaving ? Invariant($"  [SAVER {config.EffectiveInterval(true)}s]") : "";
+            string right = Invariant($"#{session.Iteration}{countStr}{saver}  [{status}]");
             string left = " wwan-probe LTE Signal Monitor";
             int pad = Math.Max(1, width - left.Length - right.Length - 1);
             lines.Add(new FrameLine(left + new string(' ', pad) + right, ConsoleColor.Cyan));

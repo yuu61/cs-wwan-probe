@@ -5,7 +5,8 @@ namespace WwanProbe
 {
     // Options as "-Name value" or "-Name:value" (PowerShell-style parameter binding): names are
     // case-insensitive and may be shortened to an unambiguous prefix, Interval / Count / CsvPath / AtPort
-    // also bind by position, and an unknown or misspelled option is an error instead of being ignored.
+    // also bind by position (BatteryInterval by name only), and an unknown or misspelled option is an error
+    // instead of being ignored.
     internal sealed partial class CommandLine
     {
         private sealed record Parameter(string Name, bool IsSwitch, params string[] Aliases);
@@ -16,6 +17,7 @@ namespace WwanProbe
             new Parameter("Count", false),
             new Parameter("CsvPath", false),
             new Parameter("AtPort", false),
+            new Parameter("BatteryInterval", false),
             new Parameter("Gps", true),
             new Parameter("Nmea", true, "Nema"),
             new Parameter("Help", true, "?", "h"),
@@ -24,15 +26,19 @@ namespace WwanProbe
         private static readonly string[] Positional = ["Interval", "Count", "CsvPath", "AtPort"];
 
         public const string Usage =
-            "Usage: cs-wwan-probe [-Interval <seconds>] [-Count <samples>] [-CsvPath <file>] [-AtPort COM<n>] [-Gps] [-Nmea]\n" +
-            "  -Interval  seconds between samples, 0..86400 (0 = back to back, about 1 s each)\n" +
-            "  -Count     number of samples, 0 = until stopped\n" +
-            "  -CsvPath   append one CSV row per sample to this file\n" +
-            "  -AtPort    send AT commands over this COM port instead of the MBIM AT services\n" +
-            "  -Gps       show Windows satellite fixes (local GNSS only)\n" +
-            "  -Nmea      also list satellites from the GNSS driver (-Nema works too; asks UAC for a helper)";
+            "Usage: cs-wwan-probe [-Interval <seconds>] [-Count <samples>] [-CsvPath <file>] [-AtPort COM<n>]\n" +
+            "                     [-BatteryInterval <seconds>] [-Gps] [-Nmea]\n" +
+            "  -Interval         seconds between samples, 0..86400 (0 = back to back, about 1 s each)\n" +
+            "  -Count            number of samples, 0 = until stopped\n" +
+            "  -CsvPath          append one CSV row per sample to this file\n" +
+            "  -AtPort           send AT commands over this COM port instead of the MBIM AT services\n" +
+            "  -BatteryInterval  on battery power or with Energy Saver on, at least this many seconds between\n" +
+            "                    samples, 0..86400 (0 = off, the default)\n" +
+            "  -Gps              show Windows satellite fixes (local GNSS only)\n" +
+            "  -Nmea             also list satellites from the GNSS driver (-Nema works too; asks UAC for a helper)";
 
         public int Interval { get; private set; }
+        public int BatteryInterval { get; private set; }
         public int Count { get; private set; }
         public string CsvPath { get; private set; } = "";
         public string AtPort { get; private set; } = "";
@@ -154,6 +160,10 @@ namespace WwanProbe
                 case "Interval":
                     if (!Integer(name, value, 0, 86400, out int interval, out error)) return false;
                     Interval = interval;
+                    return true;
+                case "BatteryInterval":
+                    if (!Integer(name, value, 0, 86400, out int batteryInterval, out error)) return false;
+                    BatteryInterval = batteryInterval;
                     return true;
                 case "Count":
                     if (!Integer(name, value, 0, int.MaxValue, out int count, out error)) return false;

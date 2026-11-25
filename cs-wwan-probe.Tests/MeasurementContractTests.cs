@@ -14,7 +14,8 @@ namespace WwanProbe.Tests
         [Fact]
         public void UnavailableInvalidEmptyAndZeroTrafficReadings()
         {
-            TrafficReading failed = new PdhTrafficCounter("wwan-probe test adapter that does not exist").Read();
+            TrafficReading failed;
+            using (PdhTrafficCounter missing = new("wwan-probe test adapter that does not exist")) failed = missing.Read();
             Assert.True(failed.RxKB is null && failed.TxKB is null && failed.BwMbps is null && failed.Error is not null, "Failed counters became zero.");
 
             List<CounterSample> samples =
@@ -30,6 +31,37 @@ namespace WwanProbe.Tests
             Assert.True(traffic.RxKB == 0 && traffic.TxKB is null && traffic.Error is not null, "Invalid counter status was accepted.");
             traffic = TrafficReading.FromSamples([]);
             Assert.True(traffic.RxKB is null && traffic.Error is not null, "An empty counter response became zero.");
+        }
+
+        // The counter keeps its query between reads: a failed read closes it and the next read opens it
+        // again (with the same result), and after Dispose a read fails without opening one. The instance
+        // name matches no adapter, so this runs on any machine: the query opens and the collection fails.
+        [Fact]
+        public void TrafficCounterReopensAfterAFailureButNotAfterDispose()
+        {
+            using PdhTrafficCounter counter = new("wwan-probe test adapter that does not exist");
+            TrafficReading first = counter.Read();
+            Assert.True(first.Error is not null && first.RxKB is null, "A missing adapter was read.");
+            Assert.Contains("(collect performance counters)", first.Error, StringComparison.Ordinal);
+            Assert.Equal(first, counter.Read());
+            Assert.Equal(2, counter.Opens);
+            counter.Dispose();
+            TrafficReading closed = counter.Read();
+            Assert.True(closed.Error is not null && closed.Error != first.Error && closed.RxKB is null && closed.BwMbps is null,
+                "A read after Dispose opened the counters again.");
+            Assert.Equal(2, counter.Opens);
+        }
+
+        // The reason text of each PDH status in a failed reading (shown on screen and in the CSV Error column).
+        [Fact]
+        public void PdhStatusReasons()
+        {
+            Assert.Equal("The counter returned no data; the adapter instance may not exist.", PdhTrafficCounter.Describe(0x800007D5));
+            Assert.Equal("The specified instance is not present.", PdhTrafficCounter.Describe(0x800007D1));
+            Assert.Equal("The specified object is not found on the system.", PdhTrafficCounter.Describe(0xC0000BB8));
+            Assert.Equal("The specified counter could not be found.", PdhTrafficCounter.Describe(0xC0000BB9));
+            Assert.Equal("The data is not valid.", PdhTrafficCounter.Describe(0xC0000BC6));
+            Assert.Equal("PDH error 0x800007D0.", PdhTrafficCounter.Describe(0x800007D0));
         }
 
         // Only device reads are simulated; the production adapter, snapshot, history, CSV and frame code run.
