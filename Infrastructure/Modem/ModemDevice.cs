@@ -32,10 +32,25 @@ namespace WwanProbe.Infrastructure.Modem
         CellsInfo GetCellsInfo();
     }
 
+    // A value one call leaves for the next call to take once. Taking it clears it, so it never reaches a
+    // later caller; Leave(null) clears it too.
+    internal sealed class Handoff<T> where T : class
+    {
+        private T? value;
+
+        public void Leave(T? item) => _ = Interlocked.Exchange(ref value, item);
+
+        public T? Take() => Interlocked.Exchange(ref value, null);
+    }
+
     // Mobile broadband modem access via WinRT.
     internal sealed class WinRtModem : IModemDevice
     {
         private readonly MobileBroadbandModem modem;
+        // The network GetNetwork read, for the GetCellsInfo call that follows it in the same sample, so a
+        // sample reads CurrentNetwork once and takes the provider and the cells from one network object
+        // (as the PowerShell version did). Samples run one at a time.
+        private readonly Handoff<MobileBroadbandNetwork> network = new();
 
         private WinRtModem(MobileBroadbandModem modem) => this.modem = modem;
 
@@ -54,7 +69,10 @@ namespace WwanProbe.Infrastructure.Modem
 
         public ModemNetworkInfo GetNetwork()
         {
+            // Nothing from an earlier sample is left when the read below fails.
+            network.Leave(null);
             MobileBroadbandNetwork? n = modem.CurrentNetwork;
+            network.Leave(n);
             return n is null
                 ? new ModemNetworkInfo("", "", "", "")
                 : new ModemNetworkInfo(n.RegisteredProviderName ?? "", n.RegisteredProviderId ?? "",
@@ -66,10 +84,11 @@ namespace WwanProbe.Infrastructure.Modem
         // 60 s) while a new query succeeds at once (measured 2026-09-24, docs/neighbor-cells.md). So a query
         // still pending after 2 s is sent once more and the first answer of the two wins; a slow first answer
         // is still taken within 10 s, but that modem then gets a second query (untested on other modems).
+        // The network GetNetwork just read, or a new read when it left none (no network then, or no GetNetwork call).
         public CellsInfo GetCellsInfo()
         {
-            MobileBroadbandNetwork network = modem.CurrentNetwork ?? throw new InvalidOperationException("The modem reports no current network.");
-            MobileBroadbandCellsInfo info = TaskWait.FirstResult(() => network.GetCellsInfoAsync().AsTask(), 10000, 2000);
+            MobileBroadbandNetwork current = network.Take() ?? modem.CurrentNetwork ?? throw new InvalidOperationException("The modem reports no current network.");
+            MobileBroadbandCellsInfo info = TaskWait.FirstResult(() => current.GetCellsInfoAsync().AsTask(), 10000, 2000);
             static LteCellInfo Lte(MobileBroadbandCellLte c)
             {
                 return new LteCellInfo(c.CellId, c.ProviderId,

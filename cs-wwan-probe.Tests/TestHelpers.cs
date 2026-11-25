@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using WwanProbe.Application;
 using WwanProbe.Domain;
@@ -68,6 +69,24 @@ namespace WwanProbe.Tests
         public TrafficReading Reading { get; set; } = new TrafficReading(0, 0, 0, null);
 
         public TrafficReading Read() => Reading;
+    }
+
+    // Simulated power state: each read returns the next of the given states, then the last one again
+    // (false when none are given). Reads counts every read.
+    internal sealed class FakePowerState(params bool[] states) : IPowerState
+    {
+        private readonly bool[] states = states;
+
+        public int Reads { get; private set; }
+
+        public bool IsSaving
+        {
+            get
+            {
+                int read = Reads++;
+                return states.Length > 0 && states[Math.Min(read, states.Length - 1)];
+            }
+        }
     }
 
     internal static class Fixtures
@@ -155,12 +174,36 @@ namespace WwanProbe.Tests
         }
     }
 
-    // Simulated terminal for the TUI loop: queued keys and a callback per drawn frame.
+    // Simulated terminal for the TUI loop: queued keys, a callback per drawn frame, and every wait.
+    // Keys are added on the loop thread (OnFrame, OnRead), so a wait returns at once when one is queued;
+    // otherwise it ends when the sample completes or after at most 25 ms (the pace of the tests).
     internal sealed class FakeTerminal : ITuiTerminal
     {
+        private static readonly TimeSpan MaxWait = TimeSpan.FromMilliseconds(25);
+        private readonly Stopwatch age = Stopwatch.StartNew();
+
+        // After this long the terminal reads q: the end of a timed test, or a watchdog so a loop that
+        // never ends fails the test instead of hanging it.
+        public TimeSpan QuitAfter { get; set; } = TimeSpan.FromSeconds(30);
+        public bool QuitByTime { get; private set; }
         public Queue<ConsoleKeyInfo> Keys { get; } = new Queue<ConsoleKeyInfo>();
         public Action<MonitorSession, MonitorView> OnFrame { get; set; } = (_, _) => { };
         public Action? OnRead { get; set; }
+        public Action<TerminalWait>? OnWait { get; set; }
+        public List<TerminalWait> Waits { get; } = [];
+        // When each wait in Waits returned (same index), on the clock of TerminalWait.At.
+        public List<TimeSpan> WaitEnds { get; } = [];
+        // ITuiTerminal.FullRedrawDue (the renderer's full redraw); never by default.
+        public Func<bool> RedrawDue { get; set; } = () => false;
+        public Func<MonitorView, bool> Resized { get; set; } = _ => false;
+        // Input that wakes every wait without a key to read (focus, mouse, key releases), like a terminal
+        // whose input handle stays signaled.
+        public bool SignaledInput { get; set; }
+
+        // Time since the terminal was made: the clock of TerminalWait.At and WaitEnds.
+        public TimeSpan Elapsed => age.Elapsed;
+
+        public bool FullRedrawDue => RedrawDue();
 
         public void Add(ConsoleKey key, char character = '\0') => Keys.Enqueue(new ConsoleKeyInfo(character, key, false, false, false));
 
@@ -168,12 +211,71 @@ namespace WwanProbe.Tests
         {
             if (Keys.Count > 0) return Keys.Dequeue();
             OnRead?.Invoke();
-            return null;
+            if (QuitByTime || age.Elapsed < QuitAfter) return null;
+            QuitByTime = true;
+            return new ConsoleKeyInfo('q', ConsoleKey.Q, false, false, false);
         }
 
-        public bool IsWindowResized(MonitorView view) => false;
+        public bool IsWindowResized(MonitorView view) => Resized(view);
 
         public void Show(MonitorSession session, MonitorView view) => OnFrame(session, view);
+
+        public bool Wait(TimeSpan timeout, WaitHandle? sampleDone)
+        {
+            TerminalWait wait = new(timeout, sampleDone is not null, age.Elapsed);
+            Waits.Add(wait);
+            OnWait?.Invoke(wait);
+            bool signaled = Block(timeout, sampleDone);
+            WaitEnds.Add(age.Elapsed);
+            return signaled;
+        }
+
+        private bool Block(TimeSpan timeout, WaitHandle? sampleDone)
+        {
+            if (Keys.Count > 0 || SignaledInput) return true;
+            TimeSpan limit = timeout < MaxWait ? timeout : MaxWait;
+            if (sampleDone is not null) return sampleDone.WaitOne(limit);
+            Thread.Sleep(limit);
+            return false;
+        }
+    }
+
+    // One wait of the TUI loop: its timeout, whether it also waited for a running sample, and when it
+    // began (FakeTerminal.Elapsed).
+    internal readonly record struct TerminalWait(TimeSpan Timeout, bool SampleDone, TimeSpan At);
+
+    // Simulated console surface: a settable size, every frame write, and the rows it leaves on the screen.
+    internal sealed class FakeConsole : IConsoleSurface
+    {
+        public ConsoleSize Current { get; set; } = new ConsoleSize(10, 4);
+        public List<FrameWrite> Writes { get; } = [];
+        public Dictionary<int, string> Screen { get; } = [];
+        public bool IoFailure { get; set; }
+        public Action? OnWrite { get; set; }
+        public int SizeReads { get; private set; }
+
+        public ConsoleSize Size
+        {
+            get
+            {
+                SizeReads++;
+                return Current;
+            }
+        }
+
+        public void WriteFrame(bool clear, IReadOnlyList<ConsoleRow> rows)
+        {
+            if (IoFailure) throw new IOException("test console failure");
+            Writes.Add(new FrameWrite(clear, [.. rows]));
+            if (clear) Screen.Clear();
+            foreach (ConsoleRow row in rows) Screen[row.Row] = row.Text;
+            OnWrite?.Invoke();
+        }
+    }
+
+    internal sealed record FrameWrite(bool Clear, List<ConsoleRow> Rows)
+    {
+        public IEnumerable<int> RowNumbers => Rows.Select(r => r.Row);
     }
 
     internal static class Keys

@@ -6,13 +6,40 @@ using WwanProbe.Infrastructure.Modem;
 namespace WwanProbe.Application
 {
     // Interval = seconds between samples (0 = back to back), Count = samples (0 = infinite),
-    // CsvPath = CSV log ("" = none), AtPort = "COMx" or "" (MBIM AT services).
+    // CsvPath = CSV log ("" = none), AtPort = "COMx" or "" (MBIM AT services),
+    // BatteryInterval = least seconds between samples while Windows saves power (0 = off),
+    // MinSampleSpacing = least time from the start of one automatic sample to the start of the next.
     internal sealed class MonitorConfig
     {
         public int Interval { get; set; }
+        public int BatteryInterval { get; set; }
         public int Count { get; set; }
         public string CsvPath { get; set; } = "";
         public string AtPort { get; set; } = "";
+        // A sample normally takes about a second (the traffic counters measure over one); a sample that
+        // fails at once (no network, airplane mode, a missing counter) would otherwise repeat back to back.
+        public TimeSpan MinSampleSpacing { get; set; } = TimeSpan.FromSeconds(1);
+
+        // The interval in force: with BatteryInterval set, at least that long while Windows saves power
+        // (saving = the power state read when the last sample completed); otherwise Interval.
+        public int EffectiveInterval(bool saving) => BatteryInterval > 0 && saving ? Math.Max(Interval, BatteryInterval) : Interval;
+
+        // When the next automatic sample is due, on the caller's monotonic clock: the effective interval
+        // after the last one completed, and not sooner than MinSampleSpacing after it started. A refresh (r),
+        // resuming and the first sample do not wait for it.
+        public TimeSpan NextSampleAt(TimeSpan started, TimeSpan completed, bool saving = false)
+        {
+            TimeSpan spaced = started + MinSampleSpacing;
+            TimeSpan interval = completed + TimeSpan.FromSeconds(EffectiveInterval(saving));
+            return spaced > interval ? spaced : interval;
+        }
+
+        // The same rule as a pause after a sample that started `elapsed` ago (never negative).
+        public TimeSpan PauseAfter(TimeSpan elapsed, bool saving = false)
+        {
+            TimeSpan pause = NextSampleAt(TimeSpan.Zero, elapsed, saving) - elapsed;
+            return pause > TimeSpan.Zero ? pause : TimeSpan.Zero;
+        }
     }
 
     // Signal series, all the same length (NaN = missing sample):
@@ -71,11 +98,17 @@ namespace WwanProbe.Application
         public LteSnapshot? Snapshot { get; set; }
         public GpsSource? GpsReceiver { get; set; }
         public NmeaReceiver? NmeaReceiver { get; set; }
+        // Read once as each sample is committed, and only with Config.BatteryInterval (null = never read).
+        public IPowerState? Power { get; set; }
+        // Whether Windows was saving power when the last sample completed (always false without BatteryInterval).
+        public bool PowerSaving { get; private set; }
         public SignalHistory History { get; } = new SignalHistory();
         public HandoverLog HandoverLog { get; set; } = new HandoverLog();
         public DowngradeLog DowngradeLog { get; set; } = new DowngradeLog();
         public int HistoryMax { get; set; } = 600;
         public int Iteration { get; set; }
+        // The AT wait per sample, shortened while the AT channel stays silent (see AtSessionTimeout).
+        public AtSessionTimeout AtTimeout { get; set; } = new AtSessionTimeout();
 
         public static MonitorSession Initialize(IModemDevice modem, ITrafficCounter traffic, MonitorConfig config, int historyMax = 600)
         {
@@ -102,11 +135,15 @@ namespace WwanProbe.Application
             DowngradeLog = new DowngradeLog();
         }
 
-        // Reads one sample from the devices; safe to run off the UI thread (it does not touch the session state).
+        // Reads one sample from the devices; safe to run off the UI thread. It touches no session state
+        // except AtTimeout, which only measurements use (one runs at a time).
         public LteSnapshot TakeSnapshot()
         {
             IModemDevice modem = Modem ?? throw new InvalidOperationException("No modem.");
-            return LteSnapshot.Take(modem, Summary.At, Traffic ?? new PdhTrafficCounter(), GpsReceiver, NmeaReceiver);
+            if (Traffic is not null) return LteSnapshot.Take(modem, Summary.At, Traffic, GpsReceiver, NmeaReceiver, AtTimeout);
+            // Without a counter of its own, each sample opens and closes one.
+            using PdhTrafficCounter traffic = new();
+            return LteSnapshot.Take(modem, Summary.At, traffic, GpsReceiver, NmeaReceiver, AtTimeout);
         }
 
         // Takes one sample and updates the session (history, CSV).
@@ -117,6 +154,8 @@ namespace WwanProbe.Application
         {
             Iteration++;
             Snapshot = snapshot;
+            // The power state for the wait before the next sample and the title; not read without BatteryInterval.
+            PowerSaving = Config.BatteryInterval > 0 && Power is { IsSaving: true };
             AddSignalHistory(snapshot);
             DowngradeLog.Add(snapshot);
             HandoverLog.Add(snapshot.PrimaryCell, snapshot.Timestamp, !string.IsNullOrEmpty(snapshot.Error));
@@ -158,6 +197,9 @@ namespace WwanProbe.Application
 
         public bool IsCompleted => Pending is { IsCompleted: true };
 
+        // Set once the running sample has finished; null when none runs. The UI waits on it with the console input.
+        public WaitHandle? SampleDone => Pending is { } task ? ((IAsyncResult)task).AsyncWaitHandle : null;
+
         // Starts a read-only measurement. A sample still running at quit is abandoned.
         public void Start()
         {
@@ -171,7 +213,12 @@ namespace WwanProbe.Application
             Task<LteSnapshot>? pending = Pending;
             if (pending is null || !pending.IsCompleted) throw new InvalidOperationException("The sample is not complete.");
             try { return pending.GetAwaiter().GetResult(); }
-            finally { Pending = null; }
+            finally
+            {
+                Pending = null;
+                // Closes the event behind SampleDone now instead of at finalization (one per sample).
+                pending.Dispose();
+            }
         }
     }
 }

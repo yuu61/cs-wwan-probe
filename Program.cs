@@ -1,6 +1,9 @@
 // LTE Signal Monitor (TUI) for Windows mobile broadband modems (tested: Fibocom L860-GL).
-// Usage: cs-wwan-probe [-Interval 0] [-Count 0] [-CsvPath "log.csv"] [-AtPort COM7] [-Gps] [-Nmea]
-// Interval=0 means back-to-back sampling (each sample still takes ~1s for counters).
+// Usage: cs-wwan-probe [-Interval 0] [-Count 0] [-CsvPath "log.csv"] [-AtPort COM7] [-BatteryInterval 0] [-Gps] [-Nmea]
+// Interval=0 means back-to-back sampling (each sample still takes ~1s for counters, and automatic
+// samples start at least 1s apart even when one fails at once).
+// BatteryInterval>0 waits at least that many seconds after a sample that completed on battery power or
+// with Energy Saver on, and the title shows [SAVER <s>s]; 0 (default) ignores the power state.
 // Count=0 means infinite loop. CsvPath enables CSV logging (one row per sample, see Application/SnapshotLog.cs).
 // AT commands (neighbors, temperature, SINR, CA) go over a vendor MBIM service found automatically;
 // AtPort uses that serial AT port instead (see docs/modem-support.md).
@@ -47,8 +50,19 @@ try
         return 1;
     }
 
-    MonitorConfig config = new() { Interval = options.Interval, Count = options.Count, CsvPath = options.CsvPath, AtPort = options.AtPort };
-    MonitorSession session = MonitorSession.Initialize(modem, new PdhTrafficCounter(), config);
+    MonitorConfig config = new()
+    {
+        Interval = options.Interval,
+        BatteryInterval = options.BatteryInterval,
+        Count = options.Count,
+        CsvPath = options.CsvPath,
+        AtPort = options.AtPort,
+    };
+    // Kept open for the whole run; a sample abandoned at quit still finishes its read before the query closes.
+    using PdhTrafficCounter traffic = new();
+    MonitorSession session = MonitorSession.Initialize(modem, traffic, config);
+    // Without -BatteryInterval the power state is never read.
+    if (options.BatteryInterval > 0) session.Power = new WinRtPowerState();
     try
     {
         if (options.Gps || options.Nmea) session.GpsReceiver = GpsSource.Start();
